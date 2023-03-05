@@ -150,7 +150,10 @@ class BTree:
             node.parent = parent_node
             sibling_node.parent = parent_node
             parent_node.left_child_pointer = node
-            return node
+            
+            if insertion_index <= middle_index:
+                return node
+            return sibling_node
 
     def _search(self, key):
         node = self.root
@@ -171,5 +174,5 @@ if __name__ == "__main__":
     btree.insert(2, 2)
     btree.insert(4, 4)
     btree.insert(6, 6)
-    btree.insert(0, 0)
+    btree.insert(8, 8)
     btree.print(btree.root)
