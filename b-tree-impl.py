@@ -39,10 +39,16 @@ class BTreeNode:
             print('\t' * indent + "Leaf Node: ")
             for cell in self.cells:
                 cell.print(indent+1)
+            if self.right_sibling_pointer:
+                print('\t' * (indent + 1) + "Sibling Pointer: ")
+                self.right_sibling_pointer.print(indent+2)
         elif self.type is NodeType.INTERNAL:
             print('\t' * indent + "Internal Node: ")
             for cell in self.cells:
                 cell.print(indent+1)
+            if self.right_sibling_pointer:
+                print('\t' * (indent + 1) + "Sibling Pointer: ")
+                self.right_sibling_pointer.print(indent+2)
 
 class BTree:
     def __init__(self, order):
@@ -134,7 +140,16 @@ class BTree:
             parent_node = self._insert(node.parent, key_to_promote, sibling_node)
             node.parent = parent_node
             sibling_node.parent = parent_node
-            parent_node.left_child_pointer = node
+
+            #   Update the left child pointer only if the parent node's first key in the first cell
+            #   is greater than the key in the last cell of the node
+            if parent_node.cells[0].key > node.cells[-1].key:
+                parent_node.left_child_pointer = node
+
+            #   Update the sibling pointers
+            temp = node.right_sibling_pointer
+            node.right_sibling_pointer = sibling_node
+            sibling_node.right_sibling_pointer = temp
 
         if node.type is NodeType.INTERNAL:
             #   Place the key into the correct node
@@ -149,7 +164,11 @@ class BTree:
             parent_node = self._insert(node.parent, key_to_promote, sibling_node)
             node.parent = parent_node
             sibling_node.parent = parent_node
-            parent_node.left_child_pointer = node
+
+            #   Update the left child pointer only if the parent node's first key in the first cell
+            #   is greater than the key in the last cell of the node
+            if parent_node.cells[0].key > node.cells[-1].key:
+                parent_node.left_child_pointer = node
             
             if insertion_index <= middle_index:
                 return node
