@@ -1,4 +1,4 @@
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from enum import Enum
 import math
 
@@ -180,6 +180,9 @@ class BTree:
                 node.parent.cells[parent_insertion_index].left_child_pointer = sibling_node
             else:
                 node.parent.right_child_pointer = sibling_node
+
+            #   For an internal node, remove the node's right child pointer
+            node.right_child_pointer = None
             
             if insertion_index <= middle_index:
                 return node
@@ -274,8 +277,11 @@ class BTree:
     
     def _search(self, key):
         node = self.root
-        while node.type is not NodeType.LEAF:
-            index = bisect_left(node.cells, key, key=lambda x: x.key)
+        while node is not None and node.type is not NodeType.LEAF:
+            #   Using bisect_right here because the invariants are maintained such that
+            #   the left child pointer of the cell at index i is the pointer to the subtree
+            #   that contains all the keys less than the key at index i
+            index = bisect_right(node.cells, key, key=lambda x: x.key)
             if index > len(node.cells) - 1:
                 node = node.right_child_pointer
             else:
