@@ -1,2 +1,5 @@
-my_btree.db
+*.db
 .vscode
+*.out
+a.out.dSYM/*
+a.out.dSYM/**/*

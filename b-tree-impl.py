@@ -282,10 +282,13 @@ class BTree:
             #   the left child pointer of the cell at index i is the pointer to the subtree
             #   that contains all the keys less than the key at index i
             index = bisect_right(node.cells, key, key=lambda x: x.key)
+            temp = node
             if index > len(node.cells) - 1:
                 node = node.right_child_pointer
             else:
                 node = node.cells[index].left_child_pointer
+                if node is not None and not isinstance(node, LeafNodeCell) and node.cells[-1].key == key:
+                    node = temp.right_child_pointer
         index = bisect_left(node.cells, key, key=lambda x: x.key)
         return node, index
 
@@ -299,5 +302,6 @@ if __name__ == "__main__":
     btree.insert(6, 6)
     btree.insert(8, 8)
     btree.print(btree.root)
-    print(btree.delete(5))
-    btree.print(btree.root)
+    print(btree.search(3))
+    # print(btree.delete(5))
+    # btree.print(btree.root)

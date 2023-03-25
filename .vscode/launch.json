@@ -5,6 +5,15 @@
     "version": "0.2.0",
     "configurations": [
         {
+            "name": "(lldb) Launch",
+            "type": "cppdbg",
+            "cwd": ".",
+            "request": "launch",
+            "program": "${workspaceFolder}/a.out",
+            "args": ["${workspaceFolder}/lox"],
+            "MIMode": "lldb"
+        },
+        {
             "name": "Python: Current File",
             "type": "python",
             "request": "launch",
