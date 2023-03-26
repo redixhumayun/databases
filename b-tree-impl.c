@@ -81,6 +81,26 @@ int binary_search(void* node, uint32_t num_cells, uint32_t key) {
     return min_index;
 }
 
+int _search(Pager* pager, uint32_t key) {
+    //  get the root node
+    void* node = get_page(pager, 0);
+    printf("The root node is %p\n", node);
+
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_of_cells(node);
+    printf("The number of cells is %d\n", num_cells);
+
+    uint32_t key_index = binary_search(node, num_cells, key);
+    printf("The key index is %d\n", key_index);
+
+    uint32_t key_at_index = *leaf_node_key(node, key_index);
+    printf("The key at index is %d\n", key_at_index);
+
+    if (key_at_index == key) {
+        return 1;
+    }
+    return -1;
+}
+
 void search(Pager* pager, uint32_t key) {
     //  get the root node
     void* node = get_page(pager, 0);
@@ -101,6 +121,44 @@ void search(Pager* pager, uint32_t key) {
     void* value = *key_pointer_address;
     printf("The value is %d\n", *(uint32_t*)value);
     printf("\n");
+}
+
+void delete(Pager* pager, uint32_t key) {
+    //  Check if the key exists first
+    if (_search(pager, key) == -1) {
+        printf("The key does not exist\n");
+        return;
+    }
+
+    //  Get the root node
+    void* node = get_page(pager, 0);
+    printf("The root node is %p\n", node);
+
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_of_cells(node);
+    printf("The number of cells is %d\n", num_cells);
+
+    uint32_t key_index = binary_search(node, num_cells, key);
+    printf("The key index is %d\n", key_index);
+
+    uint32_t key_at_index = *leaf_node_key(node, key_index);
+    printf("The key at index is %d\n", key_at_index);
+
+    void** key_pointer_address = leaf_node_key_pointer(node, key_index);
+    printf("The key pointer is %p\n", key_pointer_address);
+
+    void* value = *key_pointer_address;
+    printf("The value is %d\n", *(uint32_t*)value);
+
+    //  Shift the cells starting at one past the key index to the left
+    //  This will erase the contents of the current key and key pointer
+    uint32_t num_of_cells_to_move = num_cells - key_index - 1;
+    uint32_t size_of_data_to_move = num_of_cells_to_move * (LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE);
+    void* destination = leaf_node_cell(node, key_index);
+    void* source = leaf_node_cell(node, key_index + 1);
+    memmove(destination, source, size_of_data_to_move);
+
+    //  Update the number of cells
+    *(uint32_t*)leaf_node_num_of_cells(node) = num_cells - 1;
 }
 
 void _insert(void* node, uint32_t key, uint32_t value) {
@@ -249,6 +307,7 @@ int main() {
     insert(pager, 2, 2);
     search(pager, 2);
     search(pager, 999);
+    delete(pager, 2);
     close_database_file(pager);
     return 0;
 }
