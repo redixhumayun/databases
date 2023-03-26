@@ -14,11 +14,14 @@ const uint32_t PAGE_SIZE = 16384;
 /**
  * Leaf Node Header Layout 
  */
+const char PAGE_TYPE_SIZE = sizeof(char);
 const char NODE_INITIALIZED = 'Y';
 const uint32_t NODE_INITIALIZED_SIZE = sizeof(char);
-const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = NODE_INITIALIZED_SIZE;
+const uint32_t FREE_BLOCK_OFFSET_OFFSET = PAGE_TYPE_SIZE + NODE_INITIALIZED_SIZE;
+const uint16_t FREE_BLOCK_OFFSET_SIZE = sizeof(uint16_t);
+const uint32_t LEAF_NODE_NUM_CELLS_OFFSET = PAGE_TYPE_SIZE + NODE_INITIALIZED_SIZE + FREE_BLOCK_OFFSET_SIZE;
 const uint32_t LEAF_NODE_NUM_CELLS_SIZE = sizeof(uint32_t);
-const uint32_t LEAF_NODE_HEADER_SIZE = NODE_INITIALIZED_SIZE + LEAF_NODE_NUM_CELLS_SIZE;
+const uint32_t LEAF_NODE_HEADER_SIZE = LEAF_NODE_NUM_CELLS_OFFSET + LEAF_NODE_NUM_CELLS_SIZE;
 
 /**
  * Leaf Node Body Layout
@@ -29,6 +32,10 @@ const uintptr_t LEAF_NODE_KEY_POINTER_SIZE = sizeof(uintptr_t);
 const uint32_t LEAF_NODE_KEY_POINTER_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
 const uint32_t LEAF_NODE_VALUE_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_VALUE_OFFSET = PAGE_SIZE - LEAF_NODE_VALUE_SIZE;
+
+void* leaf_node_free_block_offset(void* node) {
+    return node + FREE_BLOCK_OFFSET_OFFSET;
+}
 
 void* leaf_node_num_of_cells(void* node) {
     return node + LEAF_NODE_NUM_CELLS_OFFSET;
@@ -123,6 +130,54 @@ void search(Pager* pager, uint32_t key) {
     printf("\n");
 }
 
+/**
+ * @brief This function is used to insert into the free block list
+ * Starting at the page header, traverse the free block list, until the first empty one is found. 
+ * Store the offset of the free block in the empty one.
+ * 
+ * @param node 
+ * @param offset 
+ */
+void _insert_into_free_block_list(void* node, void* deleted_memory_address, uint16_t deleted_memory_size) {
+    //  If the free block list is empty, store the offset in the page header
+
+    printf("The deleted memory address is %p\n", deleted_memory_address);
+    uint16_t free_block_offset = *(uint16_t*)leaf_node_free_block_offset(node);
+    uint16_t offset_between_deleted_and_header = deleted_memory_address - node;
+    printf("The offset between the deleted memory address and the header is %d\n", offset_between_deleted_and_header);
+    if (free_block_offset == 0) {
+        printf("The free block offset is 0\n");
+        *(uint16_t*)leaf_node_free_block_offset(node) = offset_between_deleted_and_header;
+        return;
+    }
+
+    //  If  the free block list is not empty, traverse the list until the first empty one is found, which is
+    //  past the address of offset
+    //  The new free block will be situated between the previous free block and the current free block
+    void* free_block = node + free_block_offset;
+    void* temp = node;
+    printf("Finding the next free block\n");
+    while(*(uint16_t*)free_block != 0 && free_block < deleted_memory_address) {
+        temp = free_block;
+        free_block = node + *(uint16_t*)free_block;
+    }
+
+    printf("The free block is %p\n", free_block);
+
+    printf("Updating the previous freeblock\n");
+    uint16_t offset_of_deleted_from_prev = (uint16_t)(deleted_memory_address - temp);
+    printf("Updating the previous freeblock with the offset to deleted memory: %d\n", offset_of_deleted_from_prev);
+    *(uint16_t*)temp = offset_of_deleted_from_prev;
+
+    printf("Setting the data for the new free block\n");
+    uint16_t offset_of_deleted_from_next = (uint16_t)(free_block - deleted_memory_address);
+    printf("Updating the new freeblock with the offset to the next free block: %d", offset_of_deleted_from_next);
+    uint16_t* deleted_memory_location = (uint16_t*) deleted_memory_address;
+    deleted_memory_location[0] = offset_of_deleted_from_next;
+    deleted_memory_location[1] = deleted_memory_size;
+    return;
+}
+
 void delete(Pager* pager, uint32_t key) {
     //  Check if the key exists first
     if (_search(pager, key) == -1) {
@@ -149,7 +204,7 @@ void delete(Pager* pager, uint32_t key) {
     void* value = *key_pointer_address;
     printf("The value is %d\n", *(uint32_t*)value);
 
-    //  Shift the cells starting at one past the key index to the left
+    //  Shift the cells starting at one past the key pointer address to the left
     //  This will erase the contents of the current key and key pointer
     uint32_t num_of_cells_to_move = num_cells - key_index - 1;
     uint32_t size_of_data_to_move = num_of_cells_to_move * (LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE);
@@ -159,6 +214,9 @@ void delete(Pager* pager, uint32_t key) {
 
     //  Update the number of cells
     *(uint32_t*)leaf_node_num_of_cells(node) = num_cells - 1;
+
+    //  Update the free block list with the address of the deleted value
+    _insert_into_free_block_list(node, value, LEAF_NODE_VALUE_SIZE);
 }
 
 void _insert(void* node, uint32_t key, uint32_t value) {
