@@ -9,7 +9,7 @@
 
 #include "./b-tree-impl.h"
 
-const uint32_t PAGE_SIZE = 16384;
+const uint32_t PAGE_SIZE = 4096;
 const int NODE_ORDER = 3;
 
 typedef enum PageType {
@@ -28,7 +28,7 @@ const uint32_t NODE_INITIALIZED_SIZE = sizeof(char);
 const uint32_t NODE_INITIALIZED_OFFSET = NODE_TYPE_SIZE;
 const uint32_t IS_ROOT_SIZE = sizeof(uint32_t);
 const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE + NODE_INITIALIZED_SIZE;
-const uint32_t PARENT_POINTER_SIZE = sizeof(uint32_t);
+const uintptr_t PARENT_POINTER_SIZE = sizeof(uintptr_t);
 const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
 const uint16_t FREE_BLOCK_OFFSET_SIZE = sizeof(uint16_t);
 const uint32_t FREE_BLOCK_OFFSET_OFFSET = PARENT_POINTER_OFFSET + PARENT_POINTER_SIZE;
@@ -112,7 +112,7 @@ void** internal_node_child_pointer(void* node, uint32_t child_num) {
 }
 
 uint32_t* internal_node_key(void* node, uint32_t key_num) {
-    return node + INTERNAL_NODE_HEADER_SIZE + key_num * (INTERNAL_NODE_CELL_SIZE + INTERNAL_NODE_CHILD_POINTER_SIZE);
+    return node + INTERNAL_NODE_HEADER_SIZE + (key_num * INTERNAL_NODE_CELL_SIZE) + INTERNAL_NODE_CHILD_POINTER_SIZE;
 }
 
 /**
@@ -139,7 +139,7 @@ uint32_t* leaf_node_value(void* node, uint32_t cell_num) {
     if (num_of_cells == 0) {
         return node + LEAF_NODE_VALUE_OFFSET;
     }
-    uint32_t* start_point = node + LEAF_NODE_VALUE_OFFSET;
+    void* start_point = node + LEAF_NODE_VALUE_OFFSET;
     for (int i = 0; i < num_of_cells; i++) {
         start_point -= LEAF_NODE_VALUE_SIZE;
     }
@@ -161,77 +161,6 @@ int check_type_of_node(void* node) {
             printf("This is an unknown node\n");
             return -1;
     }
-}
-
-int binary_search(void* node, uint32_t num_cells, uint32_t key) {
-
-    if (num_cells == 0) {
-        return 0;
-    }
-
-    uint32_t min_index = 0;
-    uint32_t one_past_max_index = num_cells;
-
-    while (one_past_max_index != min_index) {
-        uint32_t index = (min_index + one_past_max_index) / 2;
-        uint32_t key_at_index = *leaf_node_key(node, index);
-        if (key == key_at_index) {
-            return index;
-        }
-        if (key < key_at_index) {
-            one_past_max_index = index;
-        } else {
-            min_index = index + 1;
-        }
-    }
-    return min_index;
-}
-
-int _search(Pager* pager, uint32_t key) {
-    //  get the root node
-    void* node = get_page(pager, 0);
-    printf("The root node is %p\n", node);
-
-    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-    printf("The number of cells is %d\n", num_cells);
-
-    uint32_t key_index = binary_search(node, num_cells, key);
-    printf("The key index is %d\n", key_index);
-
-    uint32_t key_at_index = *leaf_node_key(node, key_index);
-    printf("The key at index is %d\n", key_at_index);
-
-    if (key_at_index == key) {
-        return 1;
-    }
-    return -1;
-}
-
-void search(Pager* pager, uint32_t key) {
-    //  get the root node
-    void* node = get_page(pager, 0);
-    printf("The root node is %p\n", node);
-
-    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-    printf("The number of cells is %d\n", num_cells);
-
-    uint32_t key_index = binary_search(node, num_cells, key);
-    printf("The key index is %d\n", key_index);
-
-    uint32_t key_at_index = *leaf_node_key(node, key_index);
-    printf("The key at index is %d\n", key_at_index);
-
-    if (key_at_index != key) {
-        printf("Key %d not found.\n", key);
-        return;
-    }
-
-    uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
-    printf("The key pointer is %p\n", key_pointer_address);
-
-    uintptr_t* value = *key_pointer_address;
-    printf("The value is %d\n", *(uint32_t*)value);
-    printf("\n");
 }
 
 /**
@@ -300,7 +229,7 @@ void delete(Pager* pager, uint32_t key) {
     }
 
     //  Get the root node
-    void* node = get_page(pager, 0);
+    void* node = get_page(pager, pager->root_page_num);
     printf("The root node is %p\n", node);
 
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
@@ -350,7 +279,6 @@ void initialize_internal_node(void* node) {
     *(char*)node_initialized(node) = NODE_INITIALIZED;
     *(uint32_t*)internal_node_num_keys(node) = 0;
     printf("Done initializing the internal node\n");
-    printf("***\n");
 }
 
 void split_internal_node(Pager* pager, void* node, void* sibling_node, uint32_t key, void* child_pointer) {
@@ -370,10 +298,10 @@ void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key,
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
     printf("The number of cells is %d\n", num_cells);
 
-    uint32_t num_cells_to_move = num_cells / 2;
-    printf("The number of cells to move is %d\n", num_cells - num_cells_to_move);
+    uint32_t start_index_of_cells_to_move = num_cells / 2;
+    printf("The number of cells to move is %d\n", num_cells - start_index_of_cells_to_move);
 
-    for (int i = num_cells_to_move; i < num_cells; i++) {
+    for (int i = start_index_of_cells_to_move; i < num_cells; i++) {
         uint32_t key = *leaf_node_key(node, i);
         uintptr_t** key_pointer_address = leaf_node_key_pointer(node, i);
         uintptr_t* value = *key_pointer_address;
@@ -383,10 +311,10 @@ void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key,
     }
 
     //  Update the number of cells in the original node
-    *(uint32_t*)leaf_node_num_cells(node) = num_cells - num_cells_to_move;
+    *(uint32_t*)leaf_node_num_cells(node) = start_index_of_cells_to_move;
 
     //  Update the number of cells in the new node
-    *(uint32_t*)leaf_node_num_cells(sibling_node) = num_cells_to_move;
+    *(uint32_t*)leaf_node_num_cells(sibling_node) = num_cells - start_index_of_cells_to_move;
 
     //  Insert the new key and value into one of the nodes
     if (key <= *leaf_node_key(sibling_node, 0)) {
@@ -443,9 +371,11 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
     memmove((void*)destination + LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE, destination, size_of_data_to_move);
 
     *(uint32_t*)leaf_node_key(node, key_index) = key;
+    printf("Set the key as %d\n", key);
 
     uint32_t* value_destination = leaf_node_value(node, key_index);
     *(uint32_t*)value_destination = value;
+    printf("Set the value as %d\n", value);
 
     uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
     *key_pointer_address = (uintptr_t*)value_destination;
@@ -471,11 +401,13 @@ void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_p
     //  Check if this node has a parent that has been initialized
     void** parent_page = node_parent_pointer(node);
 
+    //  Create a new root if the parent has not been initialized
     if (*(char*)node_initialized(*parent_page) != NODE_INITIALIZED) {
         void* new_root = get_page(pager, pager->num_pages);
         *parent_page = new_root;
         initialize_internal_node(*parent_page);
         *(uint8_t*)node_is_root(parent_page) = 1;
+        set_root_page(pager, pager->num_pages - 1);
     }
 
     printf("The internal node needs to be split\n");
@@ -521,38 +453,35 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
     }
 
     //  The node needs to split
+    printf("The leaf node needs to be split\n");
 
     //  Check if this node has a parent that has been initialized
-    void** parent_page = node_parent_pointer(node);
+    void** parent_page_pointer = node_parent_pointer(node);
 
-    if (*(char*)node_initialized(*parent_page) != NODE_INITIALIZED) {
+    if (*parent_page_pointer == NULL || *(char*)node_initialized(*parent_page_pointer) != NODE_INITIALIZED) {
         void* new_root = get_page(pager, pager->num_pages);
-        *parent_page = new_root;
-        initialize_internal_node(*parent_page);
-        *(uint8_t*)node_is_root(parent_page) = 1;
+        *parent_page_pointer = new_root;
+        initialize_internal_node(*parent_page_pointer);
+        *(uint8_t*)node_is_root(*parent_page_pointer) = 1;
+        set_root_page(pager, pager->num_pages - 1);
     }
 
-    printf("The leaf node needs to be split\n");
     void* sibling_node = get_page(pager, pager->num_pages);
     split_leaf_node(pager, node, sibling_node, key, value);
-    if (key <= *leaf_node_key(node, 0)) {
-        _insert(pager, node, key, value);
-    } else {
-        _insert(pager, sibling_node, key, value);
-    }
-    int key_to_promote = *leaf_node_key(sibling_node, 0);
-    _insert(pager, parent_page, key_to_promote, sibling_node);
-    *node_parent_pointer(sibling_node) = parent_page;
-    *node_parent_pointer(node) = parent_page;
 
-    int parent_insertion_index = binary_search(parent_page, *(uint32_t*)internal_node_num_keys(parent_page), key_to_promote);
-    int parent_num_keys = *(uint32_t*)internal_node_num_keys(parent_page);
+    int key_to_promote = *leaf_node_key(sibling_node, 0);
+    _insert(pager, *parent_page_pointer, key_to_promote, sibling_node);
+    *node_parent_pointer(sibling_node) = *parent_page_pointer;
+    *node_parent_pointer(node) = *parent_page_pointer;
+
+    int parent_insertion_index = binary_search(*parent_page_pointer, *(uint32_t*)internal_node_num_keys(*parent_page_pointer), key_to_promote);
+    int parent_num_keys = *(uint32_t*)internal_node_num_keys(*parent_page_pointer);
     if (parent_insertion_index < parent_num_keys) {
         //  Set the left child pointer of the parent at  insertion index equal to the sibling node
-        *internal_node_child_pointer(parent_page, parent_insertion_index) = sibling_node;
+        *internal_node_child_pointer(*parent_page_pointer, parent_insertion_index) = sibling_node;
     } else {
         //  Set the right child pointer of the parent at insertion index equal to the sibling node
-        *internal_node_right_child_pointer(parent_page) = sibling_node;
+        *internal_node_right_child_pointer(*parent_page_pointer) = sibling_node;
     }
 
     return;
@@ -560,17 +489,87 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
 
 void insert(Pager* pager, uint32_t key, uint32_t value) {
     //  get the root node
-    void* node = get_page(pager, 0);
+    void* node = get_page(pager, pager->root_page_num);
     printf("The root node is at %p\n", node);
 
     //  Check if the root node is initialized
-    char node_initialized_value = *(char*)node_initialized(node);
-    if (node_initialized_value != NODE_INITIALIZED) {
+    if (*(char*)node_initialized(node) != NODE_INITIALIZED) {
         initialize_leaf_node(node);
     }
 
     _insert(pager, node, key, value);
     return;
+}
+
+int binary_search(void* node, uint32_t num_cells, uint32_t key) {
+
+    if (num_cells == 0) {
+        return 0;
+    }
+
+    uint32_t min_index = 0;
+    uint32_t one_past_max_index = num_cells;
+
+    while (one_past_max_index != min_index) {
+        uint32_t index = (min_index + one_past_max_index) / 2;
+        uint32_t key_at_index = *leaf_node_key(node, index);
+        if (key == key_at_index) {
+            return index;
+        }
+        if (key < key_at_index) {
+            one_past_max_index = index;
+        } else {
+            min_index = index + 1;
+        }
+    }
+    return min_index;
+}
+
+int _search(Pager* pager, uint32_t key) {
+    //  get the root node
+    void* node = get_page(pager, pager->root_page_num);
+    printf("The root node is %p\n", node);
+
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    printf("The number of cells is %d\n", num_cells);
+
+    uint32_t key_index = binary_search(node, num_cells, key);
+    printf("The key index is %d\n", key_index);
+
+    uint32_t key_at_index = *leaf_node_key(node, key_index);
+    printf("The key at index is %d\n", key_at_index);
+
+    if (key_at_index == key) {
+        return 1;
+    }
+    return -1;
+}
+
+void search(Pager* pager, uint32_t key) {
+    //  get the root node
+    void* node = get_page(pager, pager->root_page_num);
+    printf("The root node is %p\n", node);
+
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    printf("The number of cells is %d\n", num_cells);
+
+    uint32_t key_index = binary_search(node, num_cells, key);
+    printf("The key index is %d\n", key_index);
+
+    uint32_t key_at_index = *leaf_node_key(node, key_index);
+    printf("The key at index is %d\n", key_at_index);
+
+    if (key_at_index != key) {
+        printf("Key %d not found.\n", key);
+        return;
+    }
+
+    uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+    printf("The key pointer is %p\n", key_pointer_address);
+
+    uintptr_t* value = *key_pointer_address;
+    printf("The value is %d\n", *(uint32_t*)value);
+    printf("\n");
 }
 
 Pager* open_database_file(const char* filename) {
@@ -585,6 +584,7 @@ Pager* open_database_file(const char* filename) {
     pager->file_descriptor = fd;
     pager->file_length = file_length;
     pager->num_pages = file_length / PAGE_SIZE;
+    pager->root_page_num = 0;
 
     for(uint32_t i = 0; i < MAX_NUM_OF_PAGES; i++) {
         pager->pages[i] = NULL;
@@ -630,6 +630,14 @@ void close_database_file(Pager* pager) {
     free(pager);
 }
 
+uint32_t get_root_page(Pager* pager) {
+    return pager->root_page_num;
+}
+
+void set_root_page(Pager* pager, uint32_t root_page_num) {
+    pager->root_page_num = root_page_num;
+}
+
 void* get_page(Pager* pager, uint32_t page_num) {
     if (pager->pages[page_num] == NULL) {
         void* page = malloc(PAGE_SIZE);
@@ -655,10 +663,11 @@ void* get_page(Pager* pager, uint32_t page_num) {
 int main() {
     printf("%lu\n", sizeof(uintptr_t));
     Pager* pager = open_database_file("test.db");
-    insert(pager, 999, 999);
-    insert(pager, 2, 2);
     insert(pager, 3, 3);
-    // insert(pager, 4, 4);
+    insert(pager, 5, 5);
+    insert(pager, 1, 1);
+    insert(pager, 2, 2);
+    search(pager, 1);
     close_database_file(pager);
     return 0;
 }
