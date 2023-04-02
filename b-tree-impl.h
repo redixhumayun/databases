@@ -25,3 +25,5 @@ uint32_t get_root_page(Pager* pager);
 
 void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value);
 void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_pointer);
+
+void print_node(void* node);

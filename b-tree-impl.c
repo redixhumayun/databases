@@ -470,7 +470,7 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
     split_leaf_node(pager, node, sibling_node, key, value);
 
     int key_to_promote = *leaf_node_key(sibling_node, 0);
-    _insert(pager, *parent_page_pointer, key_to_promote, sibling_node);
+    _insert(pager, *parent_page_pointer, key_to_promote, node);
     *node_parent_pointer(sibling_node) = *parent_page_pointer;
     *node_parent_pointer(node) = *parent_page_pointer;
 
@@ -660,6 +660,50 @@ void* get_page(Pager* pager, uint32_t page_num) {
     return pager->pages[page_num];
 }
 
+void print_internal_node(void* node) {
+    printf("Printing internal node\n");
+    uint32_t num_keys = *internal_node_num_keys(node);
+    printf("The number of cells is %d\n", num_keys);
+    for (uint32_t i = 0; i < num_keys; i++) {
+        printf("The key is %d\n", *internal_node_key(node, i));
+        printf("The child pointer is %p\n", internal_node_child_pointer(node, i));
+        print_node(*internal_node_child_pointer(node, i));
+    }
+    printf("The right child pointer is %p\n", internal_node_right_child_pointer(node));
+    print_node(*internal_node_right_child_pointer(node));
+}
+
+void print_leaf_node(void* node) {
+    printf("Printing leaf node\n");
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    printf("The number of cells is %d\n", num_cells);
+    for (uint32_t i = 0; i < num_cells; i++) {
+        printf("The key is %d\n", *leaf_node_key(node, i));
+        printf("The value is %d\n", *(uint32_t*)*leaf_node_key_pointer(node, i));
+    }
+}
+
+void print_node(void* node) {
+    printf("Printing node\n");
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    int node_type = check_type_of_node(node);
+    if (node_type == INTERNAL_NODE) {
+        //  print internal node
+        print_internal_node(node);
+    } else if (node_type == LEAF_NODE) {
+        //  print leaf node
+        print_leaf_node(node);
+    }
+}
+
+void print_all_pages(Pager* pager) {
+    printf("***\n");
+    printf("Printing all pages\n");
+    uint32_t root_page_num = pager->root_page_num;
+    void* root_node = get_page(pager, root_page_num);
+    print_node(root_node);
+}
+
 int main() {
     printf("%lu\n", sizeof(uintptr_t));
     Pager* pager = open_database_file("test.db");
@@ -667,7 +711,8 @@ int main() {
     insert(pager, 5, 5);
     insert(pager, 1, 1);
     insert(pager, 2, 2);
-    search(pager, 1);
+    // search(pager, 1);
+    print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
