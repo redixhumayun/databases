@@ -223,7 +223,7 @@ void delete(Pager* pager, uint32_t key) {
     printf("Deleting key %d\n", key);
 
     //  Check if the key exists first
-    if (_search(pager, key) == -1) {
+    if (search(pager, key) == -1) {
         printf("The key does not exist\n");
         return;
     }
@@ -235,7 +235,7 @@ void delete(Pager* pager, uint32_t key) {
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
     printf("The number of cells is %d\n", num_cells);
 
-    uint32_t key_index = binary_search(node, num_cells, key);
+    uint32_t key_index = binary_search(node, key);
     printf("The key index is %d\n", key_index);
 
     uint32_t key_at_index = *leaf_node_key(node, key_index);
@@ -331,7 +331,7 @@ void _insert_key_value_pair_to_internal_node(void* node, uint32_t key, void* chi
     uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
     printf("The number of keys is %d\n", num_keys);
 
-    uint32_t key_index = binary_search(node, num_keys, key);
+    uint32_t key_index = binary_search(node, key);
     printf("The key index is %d\n", key_index);
 
     uint32_t* destination = internal_node_key(node, key_index);
@@ -357,7 +357,7 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
     printf("The number of cells is %d\n", num_cells);
 
-    uint32_t key_index = binary_search(node, num_cells, key);
+    uint32_t key_index = binary_search(node, key);
     printf("The key index is %d\n", key_index);
 
     uint32_t* destination = leaf_node_key(node, key_index);
@@ -424,7 +424,7 @@ void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_p
     *node_parent_pointer(sibling_node) = parent_page;
     *node_parent_pointer(node) = parent_page;
 
-    int parent_insertion_index = binary_search(parent_page, *(uint32_t*)internal_node_num_keys(parent_page), key_to_promote);
+    int parent_insertion_index = binary_search(parent_page, key_to_promote);
     int parent_num_keys = *(uint32_t*)internal_node_num_keys(parent_page);
     if (parent_insertion_index < parent_num_keys) {
         void** parent_child_pointer = internal_node_child_pointer(parent_page, parent_insertion_index);
@@ -474,7 +474,7 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
     *node_parent_pointer(sibling_node) = *parent_page_pointer;
     *node_parent_pointer(node) = *parent_page_pointer;
 
-    int parent_insertion_index = binary_search(*parent_page_pointer, *(uint32_t*)internal_node_num_keys(*parent_page_pointer), key_to_promote);
+    int parent_insertion_index = binary_search(*parent_page_pointer, key_to_promote);
     int parent_num_keys = *(uint32_t*)internal_node_num_keys(*parent_page_pointer);
     if (parent_insertion_index < parent_num_keys) {
         //  Set the left child pointer of the parent at  insertion index equal to the sibling node
@@ -501,18 +501,50 @@ void insert(Pager* pager, uint32_t key, uint32_t value) {
     return;
 }
 
-int binary_search(void* node, uint32_t num_cells, uint32_t key) {
-
+int binary_search_modify_pointer(void** node, uint32_t key) {
+    int node_type = check_type_of_node(*node);
+    uint32_t num_cells;
+    if (node_type == LEAF_NODE) {
+        num_cells = *(uint32_t*)leaf_node_num_cells(*node);
+    } else if (node_type == INTERNAL_NODE) {
+        num_cells = *(uint32_t*)internal_node_num_keys(*node);
+    }
     if (num_cells == 0) {
         return 0;
     }
-
     uint32_t min_index = 0;
     uint32_t one_past_max_index = num_cells;
 
+    //  Perform binary search on an internal node
+    while (node_type != LEAF_NODE && one_past_max_index > min_index) {
+        uint32_t index = (min_index + one_past_max_index) / 2;
+        uint32_t key_at_index = *internal_node_key(*node, index);
+        if (key < key_at_index) {
+            //  search the left side of the node
+            one_past_max_index = index;
+        } else if (key > key_at_index) {
+            //  search the right side of the node
+            min_index = index + 1;
+        } else {
+            *node = *internal_node_right_child_pointer(*node);
+            return binary_search_modify_pointer(node, key);
+        }
+    }
+
+    //  Decide which child pointer to follow
+    if (node_type == INTERNAL_NODE) {
+        if (min_index < num_cells) {
+            *node = *internal_node_child_pointer(*node, min_index);
+        } else {
+            *node = *internal_node_right_child_pointer(*node);
+        }
+        return binary_search_modify_pointer(node, key);
+    }
+
+    //  Perform binary search on a leaf node
     while (one_past_max_index != min_index) {
         uint32_t index = (min_index + one_past_max_index) / 2;
-        uint32_t key_at_index = *leaf_node_key(node, index);
+        uint32_t key_at_index = *leaf_node_key(*node, index);
         if (key == key_at_index) {
             return index;
         }
@@ -525,51 +557,103 @@ int binary_search(void* node, uint32_t num_cells, uint32_t key) {
     return min_index;
 }
 
-int _search(Pager* pager, uint32_t key) {
-    //  get the root node
-    void* node = get_page(pager, pager->root_page_num);
-    printf("The root node is %p\n", node);
-
-    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-    printf("The number of cells is %d\n", num_cells);
-
-    uint32_t key_index = binary_search(node, num_cells, key);
-    printf("The key index is %d\n", key_index);
-
-    uint32_t key_at_index = *leaf_node_key(node, key_index);
-    printf("The key at index is %d\n", key_at_index);
-
-    if (key_at_index == key) {
-        return 1;
+int binary_search(void* node, uint32_t key) {
+    int node_type = check_type_of_node(node);
+    uint32_t num_cells;
+    if (node_type == LEAF_NODE) {
+        num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    } else if (node_type == INTERNAL_NODE) {
+        num_cells = *(uint32_t*)internal_node_num_keys(node);
     }
-    return -1;
+    if (num_cells == 0) {
+        return 0;
+    }
+    uint32_t min_index = 0;
+    uint32_t one_past_max_index = num_cells;
+
+    while (node_type != LEAF_NODE && one_past_max_index > min_index) {
+        uint32_t index = (min_index + one_past_max_index) / 2;
+        uint32_t key_at_index = *internal_node_key(node, index);
+        if (key < key_at_index) {
+            //  search the left side of the node
+            one_past_max_index = index;
+        } else if (key > key_at_index) {
+            //  search the right side of the node
+            min_index = index + 1;
+        } else {
+            //  get the page the left child pointer points to
+            node = *internal_node_child_pointer(node, index);
+            node_type = check_type_of_node(node);
+            if (node_type == INTERNAL_NODE) {
+                num_cells = *(uint32_t*)internal_node_num_keys(node);
+                min_index = 0;
+            } else {
+                break;
+            }
+        }
+    }
+
+    //  If the node is still an internal node, call binary_search with the right child pointer
+    //  If the node is a leaf node, find the key and return the index
+    if (node_type == INTERNAL_NODE) {
+        return binary_search(*internal_node_right_child_pointer(node), key);
+    } else {
+        while (one_past_max_index != min_index) {
+            uint32_t index = (min_index + one_past_max_index) / 2;
+            uint32_t key_at_index = *leaf_node_key(node, index);
+            if (key == key_at_index) {
+                return index;
+            }
+            if (key < key_at_index) {
+                one_past_max_index = index;
+            } else {
+                min_index = index + 1;
+            }
+        }
+        return min_index;
+    }
 }
 
-void search(Pager* pager, uint32_t key) {
+int search(Pager* pager, uint32_t key) {
     //  get the root node
+    printf("\n");
     void* node = get_page(pager, pager->root_page_num);
     printf("The root node is %p\n", node);
 
-    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-    printf("The number of cells is %d\n", num_cells);
+    int node_type = check_type_of_node(node);
 
-    uint32_t key_index = binary_search(node, num_cells, key);
-    printf("The key index is %d\n", key_index);
-
-    uint32_t key_at_index = *leaf_node_key(node, key_index);
-    printf("The key at index is %d\n", key_at_index);
-
-    if (key_at_index != key) {
-        printf("Key %d not found.\n", key);
-        return;
+    if (node_type == INTERNAL_NODE) {
+        uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
+        uint32_t key_index = binary_search_modify_pointer(&node, key);
+        if (key_index == -1) {
+            return -1;
+        }
+        uint32_t key_at_index = *leaf_node_key(node, key_index);
+        if (key_at_index != key) {
+            return -1;
+        }
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+        uintptr_t* value = *key_pointer_address;
+        printf("The value is %d\n", *(uint32_t*)value);
+        return 1;
+    } else if (node_type == LEAF_NODE) {
+        uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+        uint32_t key_index = binary_search(node, key);
+        if (key_index == -1) {
+            return -1;
+        }
+        uint32_t key_at_index = *leaf_node_key(node, key_index);
+        if (key_at_index != key) {
+            return -1;
+        }
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+        uintptr_t* value = *key_pointer_address;
+        printf("The value is %d\n", *(uint32_t*)value);
+        return 1;
+    } else {
+        printf("Unknown node type.\n");
+        exit(1);
     }
-
-    uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
-    printf("The key pointer is %p\n", key_pointer_address);
-
-    uintptr_t* value = *key_pointer_address;
-    printf("The value is %d\n", *(uint32_t*)value);
-    printf("\n");
 }
 
 Pager* open_database_file(const char* filename) {
@@ -705,14 +789,13 @@ void print_all_pages(Pager* pager) {
 }
 
 int main() {
-    printf("%lu\n", sizeof(uintptr_t));
     Pager* pager = open_database_file("test.db");
     insert(pager, 3, 3);
     insert(pager, 5, 5);
     insert(pager, 1, 1);
     insert(pager, 2, 2);
-    // search(pager, 1);
-    print_all_pages(pager);
+    search(pager, 1);
+    // print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }

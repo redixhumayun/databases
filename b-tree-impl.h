@@ -10,9 +10,8 @@ typedef struct {
     uint32_t root_page_num;
 } Pager;
 
-int binary_search(void* node, uint32_t num_cells, uint32_t key);
-void search(Pager* pager, uint32_t key);
-int _search(Pager* pager, uint32_t key);
+int binary_search(void* node, uint32_t key);
+int search(Pager* pager, uint32_t key);
 
 void* get_page(Pager* pager, uint32_t page_num);
 
