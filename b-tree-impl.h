@@ -11,6 +11,7 @@ typedef struct {
 } Pager;
 
 int binary_search(void* node, uint32_t key);
+int binary_search_modify_pointer(void** node, uint32_t key);
 int search(Pager* pager, uint32_t key);
 
 void* get_page(Pager* pager, uint32_t page_num);

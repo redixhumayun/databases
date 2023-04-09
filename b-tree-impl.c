@@ -32,7 +32,7 @@ const uintptr_t PARENT_POINTER_SIZE = sizeof(uintptr_t);
 const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
 const uint16_t FREE_BLOCK_OFFSET_SIZE = sizeof(uint16_t);
 const uint32_t FREE_BLOCK_OFFSET_OFFSET = PARENT_POINTER_OFFSET + PARENT_POINTER_SIZE;
-const uint8_t COMMON_NODE_HEADER_SIZE =
+const uint32_t COMMON_NODE_HEADER_SIZE =
     NODE_TYPE_SIZE + NODE_INITIALIZED_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE + FREE_BLOCK_OFFSET_SIZE;
 
 /**
@@ -93,7 +93,7 @@ void** node_parent_pointer(void* node) {
 }
 
 uint32_t* node_free_block_offset(void* node) {
-    return node + FREE_BLOCK_OFFSET_OFFSET;
+    return (uint32_t*)((char*)node + FREE_BLOCK_OFFSET_OFFSET);
 }
 
 /**
@@ -209,7 +209,7 @@ void _insert_into_free_block_list(void* node, void* deleted_memory_address, uint
 
     printf("Setting the data for the new free block\n");
     uint32_t offset_of_deleted_from_next = (uint32_t)(free_block - deleted_memory_address);
-    printf("Updating the new freeblock with the offset to the next free block: %d", offset_of_deleted_from_next);
+    printf("Updating the new freeblock with the offset to the next free block: %d\n", offset_of_deleted_from_next);
     uint32_t* deleted_memory_location = (uint32_t*) deleted_memory_address;
     deleted_memory_location[0] = offset_of_deleted_from_next;
     deleted_memory_location[1] = deleted_memory_size;
@@ -232,11 +232,11 @@ void delete(Pager* pager, uint32_t key) {
     void* node = get_page(pager, pager->root_page_num);
     printf("The root node is %p\n", node);
 
-    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-    printf("The number of cells is %d\n", num_cells);
-
-    uint32_t key_index = binary_search(node, key);
+    uint32_t key_index = binary_search_modify_pointer(&node, key);
     printf("The key index is %d\n", key_index);
+
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    printf("The number of cells in the node is %d\n", num_cells);
 
     uint32_t key_at_index = *leaf_node_key(node, key_index);
     printf("The key at index is %d\n", key_at_index);
@@ -501,6 +501,14 @@ void insert(Pager* pager, uint32_t key, uint32_t value) {
     return;
 }
 
+/**
+ * @brief This method will take a pointer to a page and a key and will return the index of the key in the page
+ * It will also modify the pointer to the page to point to the correct child node
+ * 
+ * @param node 
+ * @param key 
+ * @return int 
+ */
 int binary_search_modify_pointer(void** node, uint32_t key) {
     int node_type = check_type_of_node(*node);
     uint32_t num_cells;
@@ -614,6 +622,15 @@ int binary_search(void* node, uint32_t key) {
     }
 }
 
+
+/**
+ * @brief This method is responsible for searching for a key in the B+ tree
+ * It handles two cases, one where the node passed is an internal node and the other where it is a leaf node
+ * 
+ * @param pager 
+ * @param key 
+ * @return int 
+ */
 int search(Pager* pager, uint32_t key) {
     //  get the root node
     printf("\n");
@@ -795,7 +812,9 @@ int main() {
     insert(pager, 1, 1);
     insert(pager, 2, 2);
     search(pager, 1);
-    // print_all_pages(pager);
+    delete(pager, 1);
+    search(pager, 1);
+    print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
