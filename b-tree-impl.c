@@ -93,7 +93,7 @@ void** node_parent_pointer(void* node) {
 }
 
 uint32_t* node_free_block_offset(void* node) {
-    return (uint32_t*)((char*)node + FREE_BLOCK_OFFSET_OFFSET);
+    return node + FREE_BLOCK_OFFSET_OFFSET;
 }
 
 /**
@@ -169,21 +169,21 @@ int check_type_of_node(void* node) {
  * Store the offset of the free block in the empty one.
  * 
  * @param node 
- * @param offset 
+ * @param deleted_memory_address
+ * @param deleted_memory_size 
  */
 void _insert_into_free_block_list(void* node, void* deleted_memory_address, uint16_t deleted_memory_size) {
     printf("***\n");
     printf("Deleting memory address %p of size %d\n", deleted_memory_address, deleted_memory_size);
 
     //  If the free block list is empty, store the offset in the page header
-
     printf("The deleted memory address is %p\n", deleted_memory_address);
-    uint32_t free_block_offset = *(uint32_t*)node_free_block_offset(node);
+    uint16_t free_block_offset = *(uint16_t*)node_free_block_offset(node);
     uint32_t offset_between_deleted_and_header = deleted_memory_address - node;
     printf("The offset between the deleted memory address and the header is %d\n", offset_between_deleted_and_header);
     if (free_block_offset == 0) {
         printf("The free block offset is 0\n");
-        *(uint32_t*)node_free_block_offset(node) = offset_between_deleted_and_header;
+        *(uint16_t*)node_free_block_offset(node) = offset_between_deleted_and_header;
         printf("Done setting the free block address\n");
         printf("***\n");
         return;
@@ -195,22 +195,22 @@ void _insert_into_free_block_list(void* node, void* deleted_memory_address, uint
     void* free_block = node + free_block_offset;
     void* temp = node;
     printf("Finding the next free block\n");
-    while(*(uint32_t*)free_block != 0 && free_block < deleted_memory_address) {
+    while(*(uint16_t*)free_block != 0 && free_block < deleted_memory_address) {
         temp = free_block;
-        free_block = node + *(uint32_t*)free_block;
+        free_block = node + *(uint16_t*)free_block;
     }
 
     printf("The free block is %p\n", free_block);
 
     printf("Updating the previous freeblock\n");
-    uint32_t offset_of_deleted_from_prev = (uint32_t)(deleted_memory_address - temp);
+    uint16_t offset_of_deleted_from_prev = (uint16_t)(deleted_memory_address - temp);
     printf("Updating the previous freeblock with the offset to deleted memory: %d\n", offset_of_deleted_from_prev);
-    *(uint32_t*)temp = offset_of_deleted_from_prev;
+    *(uint16_t*)temp = offset_of_deleted_from_prev;
 
     printf("Setting the data for the new free block\n");
-    uint32_t offset_of_deleted_from_next = (uint32_t)(free_block - deleted_memory_address);
+    uint16_t offset_of_deleted_from_next = (uint16_t)(free_block - deleted_memory_address);
     printf("Updating the new freeblock with the offset to the next free block: %d\n", offset_of_deleted_from_next);
-    uint32_t* deleted_memory_location = (uint32_t*) deleted_memory_address;
+    uint16_t* deleted_memory_location = (uint16_t*)deleted_memory_address;
     deleted_memory_location[0] = offset_of_deleted_from_next;
     deleted_memory_location[1] = deleted_memory_size;
     printf("Done deleting memory address %p of size %d\n", deleted_memory_address, deleted_memory_size);
@@ -268,6 +268,7 @@ void initialize_leaf_node(void* node) {
     printf("Initializing the node as a leaf node\n");
     *(uint32_t*)node = LEAF_NODE;
     *(char*)node_initialized(node) = NODE_INITIALIZED;
+    *(uint32_t*)node_free_block_offset(node) = 0;
     *(uint32_t*)leaf_node_num_cells(node) = 0;
     printf("Done initializing the leaf node\n");
     printf("***\n");
@@ -277,6 +278,7 @@ void initialize_internal_node(void* node) {
     printf("Initializing the node as an internal node\n");
     *(uint32_t*)node = INTERNAL_NODE;
     *(char*)node_initialized(node) = NODE_INITIALIZED;
+    *(uint32_t*)node_free_block_offset(node) = 0;
     *(uint32_t*)internal_node_num_keys(node) = 0;
     printf("Done initializing the internal node\n");
 }
@@ -811,10 +813,10 @@ int main() {
     insert(pager, 5, 5);
     insert(pager, 1, 1);
     insert(pager, 2, 2);
-    search(pager, 1);
+    // search(pager, 1);
     delete(pager, 1);
-    search(pager, 1);
-    print_all_pages(pager);
+    // search(pager, 1);
+    // print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
