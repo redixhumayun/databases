@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -8,6 +9,7 @@
 #include <fcntl.h>
 
 #include "./b-tree-impl.h"
+#include "./utils.h"
 
 const uint32_t PAGE_SIZE = 4096;
 const int NODE_ORDER = 3;
@@ -18,6 +20,18 @@ typedef enum PageType {
 } PageType;
 
 const char NODE_INITIALIZED = 'Y';
+
+/**
+ * @brief The size of this struct on my current compiler is 24 bytes
+ * 
+ */
+typedef struct Row {
+    uint32_t id;
+    uint32_t tx_id;
+    uint32_t data;
+    bool is_deleted;
+    void* next_row;
+} Row;
 
 /*
  * Common Node Header Layout
@@ -70,7 +84,7 @@ const uint32_t LEAF_NODE_KEY_SIZE = sizeof(uint32_t);
 const uint32_t LEAF_NODE_KEY_OFFSET = LEAF_NODE_HEADER_SIZE;
 const uintptr_t LEAF_NODE_KEY_POINTER_SIZE = sizeof(uintptr_t);
 const uint32_t LEAF_NODE_KEY_POINTER_OFFSET = LEAF_NODE_KEY_OFFSET + LEAF_NODE_KEY_SIZE;
-const uint32_t LEAF_NODE_VALUE_SIZE = sizeof(uint32_t);
+const uint32_t LEAF_NODE_VALUE_SIZE = sizeof(Row);
 const uint32_t LEAF_NODE_VALUE_OFFSET = PAGE_SIZE - LEAF_NODE_VALUE_SIZE;
 
 /**
@@ -134,7 +148,7 @@ uintptr_t** leaf_node_key_pointer(void* node, uint32_t cell_num) {
     return node + LEAF_NODE_HEADER_SIZE + cell_num * (LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE) + LEAF_NODE_KEY_SIZE;
 }
 
-uint32_t* leaf_node_value(void* node, uint32_t cell_num) {
+Row* leaf_node_value(void* node, uint32_t cell_num) {
     uint32_t num_of_cells = *(uint32_t*)(leaf_node_num_cells(node));
     if (num_of_cells == 0) {
         return node + LEAF_NODE_VALUE_OFFSET;
@@ -143,7 +157,7 @@ uint32_t* leaf_node_value(void* node, uint32_t cell_num) {
     for (int i = 0; i < num_of_cells; i++) {
         start_point -= LEAF_NODE_VALUE_SIZE;
     }
-    return start_point;
+    return (Row*)start_point;
 }
 
 
@@ -375,12 +389,15 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
     *(uint32_t*)leaf_node_key(node, key_index) = key;
     printf("Set the key as %d\n", key);
 
-    uint32_t* value_destination = leaf_node_value(node, key_index);
-    *(uint32_t*)value_destination = value;
-    printf("Set the value as %d\n", value);
+    Row* row = leaf_node_value(node, key_index);
+    row->id = generate_random_uint32();
+    row->tx_id = 0;
+    row->data = value;
+    row->is_deleted = false;
+    row->next_row = NULL;
 
     uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
-    *key_pointer_address = (uintptr_t*)value_destination;
+    *key_pointer_address = (uintptr_t*)row;
 
     *(uint32_t*)leaf_node_num_cells(node) = num_cells + 1;
     printf("\n");
@@ -782,7 +799,9 @@ void print_leaf_node(void* node) {
     printf("The number of cells is %d\n", num_cells);
     for (uint32_t i = 0; i < num_cells; i++) {
         printf("The key is %d\n", *leaf_node_key(node, i));
-        printf("The value is %d\n", *(uint32_t*)*leaf_node_key_pointer(node, i));
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, i);
+        Row* row = (Row*)*key_pointer_address;
+        printf("The value is %d\n", row->data);
     }
 }
 
@@ -810,11 +829,11 @@ void print_all_pages(Pager* pager) {
 int main() {
     Pager* pager = open_database_file("test.db");
     insert(pager, 3, 3);
-    insert(pager, 5, 5);
-    insert(pager, 1, 1);
-    insert(pager, 2, 2);
+    // insert(pager, 5, 5);
+    // insert(pager, 1, 1);
+    // insert(pager, 2, 2);
     // search(pager, 1);
-    delete(pager, 1);
+    // delete(pager, 1);
     // search(pager, 1);
     print_all_pages(pager);
     close_database_file(pager);
