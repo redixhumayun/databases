@@ -1,5 +1,6 @@
 *.db
 .vscode
 *.out
+*.txt
 a.out.dSYM/*
 a.out.dSYM/**/*

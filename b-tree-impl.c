@@ -9,6 +9,7 @@
 #include <fcntl.h>
 
 #include "./b-tree-impl.h"
+#include "./wal.h"
 #include "./utils.h"
 
 const uint32_t PAGE_SIZE = 4096;
@@ -389,9 +390,15 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
     *(uint32_t*)leaf_node_key(node, key_index) = key;
     printf("Set the key as %d\n", key);
 
+    uint32_t tx_id = wal_write(value);
+    if (tx_id == -1) {
+        printf("Failed to write to the WAL\n");
+        return;
+    }
+
     Row* row = leaf_node_value(node, key_index);
     row->id = generate_random_uint32();
-    row->tx_id = 0;
+    row->tx_id = tx_id;
     row->data = value;
     row->is_deleted = false;
     row->next_row = NULL;
@@ -709,6 +716,7 @@ Pager* open_database_file(const char* filename) {
     for(uint32_t i = 0; i < MAX_NUM_OF_PAGES; i++) {
         pager->pages[i] = NULL;
     }
+    wal_init("wal.txt");
     return pager;
 }
 
@@ -748,6 +756,7 @@ void close_database_file(Pager* pager) {
         free(pager->pages[i]);
     }
     free(pager);
+    wal_close();
 }
 
 uint32_t get_root_page(Pager* pager) {
