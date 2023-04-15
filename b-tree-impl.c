@@ -816,7 +816,7 @@ int main() {
     // search(pager, 1);
     delete(pager, 1);
     // search(pager, 1);
-    // print_all_pages(pager);
+    print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
