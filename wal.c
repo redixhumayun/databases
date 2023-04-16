@@ -25,7 +25,6 @@ int wal_write(uint32_t value) {
     }
     //  Read the beginning of the file and increment the number of records
     WalHeader* wal_header = (WalHeader*)malloc(sizeof(WalHeader));
-    printf("Size of WalHeader: %lu\n", sizeof(WalHeader));
     int read_result = read(fd, wal_header, sizeof(WalHeader));
     if (read_result == -1) {
         perror("Error reading WAL header");
@@ -49,7 +48,6 @@ int wal_write(uint32_t value) {
     }
 
     WalRecord* record = (WalRecord*)malloc(sizeof(WalRecord));
-    printf("Size of WalRecord: %lu\n", sizeof(WalRecord));
     record->size = sizeof(value);
     record->transaction_type = INSERT;
     record->tx_id = last_record->tx_id + 1;

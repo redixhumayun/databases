@@ -10,11 +10,16 @@ typedef enum TransactionType {
 
 /**
  * WAL Header Layout
+ * The size of this struct is 4 bytes
  */
 typedef struct WalHeader {
     uint32_t num_of_records;
 } WalHeader;
 
+/**
+ * WAL Record Layout
+ * The size of this struct is 16 bytes
+ */
 typedef struct WalRecord {
     uint32_t size;      // Size of the record in bytes
     TransactionType transaction_type;

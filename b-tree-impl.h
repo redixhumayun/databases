@@ -12,7 +12,7 @@ typedef struct {
 
 int binary_search(void* node, uint32_t key);
 int binary_search_modify_pointer(void** node, uint32_t key);
-int search(Pager* pager, uint32_t key);
+int search(Pager* pager, void** node, uint32_t key);
 
 void* get_page(Pager* pager, uint32_t page_num);
 void set_root_page(Pager* pager, uint32_t root_page_num);

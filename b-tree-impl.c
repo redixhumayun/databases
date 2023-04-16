@@ -149,7 +149,7 @@ uintptr_t** leaf_node_key_pointer(void* node, uint32_t cell_num) {
     return node + LEAF_NODE_HEADER_SIZE + cell_num * (LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE) + LEAF_NODE_KEY_SIZE;
 }
 
-Row* leaf_node_value(void* node, uint32_t cell_num) {
+Row* next_available_leaf_node_cell(void* node) {
     uint32_t num_of_cells = *(uint32_t*)(leaf_node_num_cells(node));
     if (num_of_cells == 0) {
         return node + LEAF_NODE_VALUE_OFFSET;
@@ -237,15 +237,13 @@ void delete(Pager* pager, uint32_t key) {
     printf("****\n");
     printf("Deleting key %d\n", key);
 
+    void* node = get_page(pager, pager->root_page_num);
+
     //  Check if the key exists first
-    if (search(pager, key) == -1) {
+    if (search(pager, &node, key) == -1) {
         printf("The key does not exist\n");
         return;
     }
-
-    //  Get the root node
-    void* node = get_page(pager, pager->root_page_num);
-    printf("The root node is %p\n", node);
 
     uint32_t key_index = binary_search_modify_pointer(&node, key);
     printf("The key index is %d\n", key_index);
@@ -277,6 +275,35 @@ void delete(Pager* pager, uint32_t key) {
     _insert_into_free_block_list(node, value, LEAF_NODE_VALUE_SIZE);
     printf("Done deleting key %d\n", key);
     printf("****\n");
+}
+
+void update(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_id) {
+    uint32_t key_index = binary_search_modify_pointer(&node, key);
+    uint32_t key_at_index = *leaf_node_key(node, key_index);
+    uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+    Row* row = (Row*)*key_pointer_address;
+
+    if (row->tx_id > tx_id) {
+        printf("The transaction id is %d, which is greater than the current transaction id %d. Cannot update the row\n", row->tx_id, tx_id);
+        return;
+    }
+
+    Row* new_row = next_available_leaf_node_cell(node);
+    new_row->id = row->id;
+    new_row->is_deleted = false;
+    new_row->tx_id = tx_id;
+    new_row->data = value;
+    new_row->next_row = row;
+    
+    //  update the original row with the new row data
+    *key_pointer_address = (uintptr_t*)new_row;
+
+    //  mark the old row for deletion
+    row->is_deleted = true;
+
+    //  update the free block list with the address of the deleted value
+    _insert_into_free_block_list(node, row, LEAF_NODE_VALUE_SIZE);
+    return;
 }
 
 void initialize_leaf_node(void* node) {
@@ -396,7 +423,7 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
         return;
     }
 
-    Row* row = leaf_node_value(node, key_index);
+    Row* row = next_available_leaf_node_cell(node);
     row->id = generate_random_uint32();
     row->tx_id = tx_id;
     row->data = value;
@@ -513,7 +540,7 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
     return;
 }
 
-void insert(Pager* pager, uint32_t key, uint32_t value) {
+void insert(Pager* pager, uint32_t key, uint32_t value, uint32_t tx_id) {
     //  get the root node
     void* node = get_page(pager, pager->root_page_num);
     printf("The root node is at %p\n", node);
@@ -523,8 +550,67 @@ void insert(Pager* pager, uint32_t key, uint32_t value) {
         initialize_leaf_node(node);
     }
 
+    //  Check if this key already exists. If it does, run the update function instead
+    if (search(pager, &node, key) != -1) {
+        update(pager, node, key, value, tx_id);
+        return;
+    }
+
     _insert(pager, node, key, value);
     return;
+}
+
+void _select_all_rows(Pager* pager, void* node, uint32_t tx_id) {
+    int node_type = check_type_of_node(node);
+    if (node_type == INTERNAL_NODE) {
+        uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
+        for (int i = 0; i < num_keys; i++) {
+            void** child_pointer = internal_node_child_pointer(node, i);
+            _select_all_rows(pager, *child_pointer, tx_id);
+        }
+        return;
+    }
+
+    //  handle leaf node
+    uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
+    for (int i = 0; i < num_cells; i++) {
+        uint32_t* key = leaf_node_key(node, i);
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, i);
+        Row* row = (Row*)*key_pointer_address;
+        //  This row is at the head of the linked list
+        //  Iterate through the linked list and print all versions of this row
+        while (row != NULL) {
+            if (row->tx_id <= tx_id && row->is_deleted == false) {
+                printf("The key is %d and the value is %d\n", *key, row->data);
+            } else {
+                if (row->is_deleted == true) {
+                    printf("The key is %d and the value is %d but it has been deleted\n", *key, row->data);
+                } else if (row->tx_id > tx_id) {
+                    printf("The key is %d and the value is %d but it has been updated\n", *key, row->data);
+                }
+            }
+            row = row->next_row;
+        }
+    }
+}
+
+/**
+ * @brief This method will attempt to read all the rows that have been inserted into
+ * the database so far. 
+ * 
+ * @param pager 
+ */
+void select_all_rows(Pager* pager, uint32_t tx_id) {
+    void* node = get_page(pager, pager->root_page_num);
+    printf("The root node is at %p\n", node);
+
+    //  Check if the root node is initialized
+    if (*(char*)node_initialized(node) != NODE_INITIALIZED) {
+        printf("The root node is not initialized\n");
+        return;
+    }
+
+    _select_all_rows(pager, node, tx_id);
 }
 
 /**
@@ -652,47 +738,42 @@ int binary_search(void* node, uint32_t key) {
 /**
  * @brief This method is responsible for searching for a key in the B+ tree
  * It handles two cases, one where the node passed is an internal node and the other where it is a leaf node
- * 
+ * Returns -1 if the key is not found. Else, returns the key
  * @param pager 
  * @param key 
  * @return int 
  */
-int search(Pager* pager, uint32_t key) {
-    //  get the root node
-    printf("\n");
-    void* node = get_page(pager, pager->root_page_num);
-    printf("The root node is %p\n", node);
-
+int search(Pager* pager, void** node, uint32_t key) {
     int node_type = check_type_of_node(node);
 
     if (node_type == INTERNAL_NODE) {
         uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
-        uint32_t key_index = binary_search_modify_pointer(&node, key);
+        uint32_t key_index = binary_search_modify_pointer(node, key);
         if (key_index == -1) {
             return -1;
         }
-        uint32_t key_at_index = *leaf_node_key(node, key_index);
+        uint32_t key_at_index = *leaf_node_key(*node, key_index);
         if (key_at_index != key) {
             return -1;
         }
-        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(*node, key_index);
         uintptr_t* value = *key_pointer_address;
         printf("The value is %d\n", *(uint32_t*)value);
         return 1;
     } else if (node_type == LEAF_NODE) {
-        uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
-        uint32_t key_index = binary_search(node, key);
+        uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(*node);
+        uint32_t key_index = binary_search(*node, key);
         if (key_index == -1) {
             return -1;
         }
-        uint32_t key_at_index = *leaf_node_key(node, key_index);
+        uint32_t key_at_index = *leaf_node_key(*node, key_index);
         if (key_at_index != key) {
             return -1;
         }
-        uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
+        uintptr_t** key_pointer_address = leaf_node_key_pointer(*node, key_index);
         uintptr_t* value = *key_pointer_address;
         printf("The value is %d\n", *(uint32_t*)value);
-        return 1;
+        return key_at_index;
     } else {
         printf("Unknown node type.\n");
         exit(1);
@@ -837,14 +918,17 @@ void print_all_pages(Pager* pager) {
 
 int main() {
     Pager* pager = open_database_file("test.db");
-    insert(pager, 3, 3);
+    insert(pager, 3, 3, 1);
+    select_all_rows(pager, 3);
+    insert(pager, 3, 6, 5);
+    select_all_rows(pager, 7);
     // insert(pager, 5, 5);
     // insert(pager, 1, 1);
     // insert(pager, 2, 2);
     // search(pager, 1);
     // delete(pager, 1);
     // search(pager, 1);
-    print_all_pages(pager);
+    // print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
