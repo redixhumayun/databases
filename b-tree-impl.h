@@ -1,6 +1,8 @@
 #include <stdint.h>
+#include <limits.h>
 
 #define MAX_NUM_OF_PAGES 100
+#define MAX_TRANSACTION_ID INT_MAX
 
 typedef struct {
     int file_descriptor;

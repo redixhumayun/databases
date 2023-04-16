@@ -30,5 +30,6 @@ typedef struct WalRecord {
 void wal_init(const char *wal_path);
 int wal_write(uint32_t data);
 void wal_close();
+uint32_t get_next_xid();
 
 #endif

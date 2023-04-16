@@ -1,6 +1,7 @@
 {
     "python.analysis.typeCheckingMode": "basic",
     "files.associations": {
-        "stdint.h": "c"
+        "stdint.h": "c",
+        "wal.h": "c"
     }
 }

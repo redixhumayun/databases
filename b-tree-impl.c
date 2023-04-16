@@ -7,6 +7,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <pthread.h>
 
 #include "./b-tree-impl.h"
 #include "./wal.h"
@@ -22,17 +23,30 @@ typedef enum PageType {
 
 const char NODE_INITIALIZED = 'Y';
 
+//  Define the required mutexes here
+pthread_mutex_t row_lock;
+pthread_mutex_t pager_lock;
+
 /**
  * @brief The size of this struct on my current compiler is 24 bytes
  * 
  */
 typedef struct Row {
     uint32_t id;
-    uint32_t tx_id;
+    uint32_t xmin;  //  using postgresql xmin
+    uint32_t xmax;  //  using postgresql xmax
     uint32_t data;
     bool is_deleted;
-    void* next_row;
+    void* prev_row;
 } Row;
+
+typedef struct Transaction {
+    uint32_t tx_id;
+    TransactionType transaction_type;
+    uint32_t key;
+    uint32_t value;
+    Pager* pager;
+} Transaction;
 
 /*
  * Common Node Header Layout
@@ -283,22 +297,24 @@ void update(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_
     uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
     Row* row = (Row*)*key_pointer_address;
 
-    if (row->tx_id > tx_id) {
-        printf("The transaction id is %d, which is greater than the current transaction id %d. Cannot update the row\n", row->tx_id, tx_id);
+    if (row->xmin > tx_id) {
+        printf("The transaction id of the row is %d, which is greater than the current transaction id %d. Cannot update the row\n", row->xmin, tx_id);
         return;
     }
 
     Row* new_row = next_available_leaf_node_cell(node);
     new_row->id = row->id;
     new_row->is_deleted = false;
-    new_row->tx_id = tx_id;
+    new_row->xmin = tx_id;
+    new_row->xmax = MAX_TRANSACTION_ID;
     new_row->data = value;
-    new_row->next_row = row;
+    new_row->prev_row = row;
     
     //  update the original row with the new row data
     *key_pointer_address = (uintptr_t*)new_row;
 
     //  mark the old row for deletion
+    row->xmax = tx_id;
     row->is_deleted = true;
 
     //  update the free block list with the address of the deleted value
@@ -425,10 +441,11 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
 
     Row* row = next_available_leaf_node_cell(node);
     row->id = generate_random_uint32();
-    row->tx_id = tx_id;
+    row->xmin = tx_id;
+    row->xmax = MAX_TRANSACTION_ID;
     row->data = value;
     row->is_deleted = false;
-    row->next_row = NULL;
+    row->prev_row = NULL;
 
     uintptr_t** key_pointer_address = leaf_node_key_pointer(node, key_index);
     *key_pointer_address = (uintptr_t*)row;
@@ -580,16 +597,14 @@ void _select_all_rows(Pager* pager, void* node, uint32_t tx_id) {
         //  This row is at the head of the linked list
         //  Iterate through the linked list and print all versions of this row
         while (row != NULL) {
-            if (row->tx_id <= tx_id && row->is_deleted == false) {
+            if (row->xmin <= tx_id && tx_id <= row->xmax) {
+                //  visibile to the transaction
                 printf("The key is %d and the value is %d\n", *key, row->data);
             } else {
-                if (row->is_deleted == true) {
-                    printf("The key is %d and the value is %d but it has been deleted\n", *key, row->data);
-                } else if (row->tx_id > tx_id) {
-                    printf("The key is %d and the value is %d but it has been updated\n", *key, row->data);
-                }
+                //  not visible to the transaction
+                printf("The key is %d and the value is %d but it is not visible to the transaction\n", *key, row->data);
             }
-            row = row->next_row;
+            row = row->prev_row;
         }
     }
 }
@@ -780,6 +795,29 @@ int search(Pager* pager, void** node, uint32_t key) {
     }
 }
 
+void* start_transaction(void* t) {
+    //  cast the pointer to a transaction pointer
+    Transaction* transaction = (Transaction*)t;
+
+    //  Get the transaction ID for this transaction
+    uint32_t tx_id = get_next_xid();
+    transaction->tx_id = tx_id;
+
+    printf("The transaction ID is %d\n", tx_id);
+    switch(transaction->transaction_type) {
+        case INSERT:
+            insert(transaction->pager, transaction->key, transaction->value, transaction->tx_id);
+            break;
+        case DELETE:
+            delete(transaction->pager, transaction->key);
+            break;
+        default:
+            printf("Unknown transaction type.\n");
+            exit(1);
+    }
+    return NULL;
+}
+
 Pager* open_database_file(const char* filename) {
     int fd = open(filename, O_RDWR | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR);
     if (fd == -1) {
@@ -849,6 +887,7 @@ void set_root_page(Pager* pager, uint32_t root_page_num) {
 }
 
 void* get_page(Pager* pager, uint32_t page_num) {
+    pthread_mutex_lock(&pager_lock);
     if (pager->pages[page_num] == NULL) {
         void* page = malloc(PAGE_SIZE);
         uint32_t num_pages = pager->file_length / PAGE_SIZE;
@@ -867,6 +906,7 @@ void* get_page(Pager* pager, uint32_t page_num) {
             pager->num_pages = page_num + 1;
         }
     }
+    pthread_mutex_unlock(&pager_lock);
     return pager->pages[page_num];
 }
 
@@ -918,10 +958,19 @@ void print_all_pages(Pager* pager) {
 
 int main() {
     Pager* pager = open_database_file("test.db");
-    insert(pager, 3, 3, 1);
-    select_all_rows(pager, 3);
-    insert(pager, 3, 6, 5);
-    select_all_rows(pager, 7);
+    Transaction* t1 = malloc(sizeof(Transaction));
+    t1->tx_id = -1;
+    t1->transaction_type = INSERT;
+    t1->key = 3;
+    t1->value = 3;
+    t1->pager = pager;
+    pthread_t thread1;
+    pthread_create(&thread1, NULL, start_transaction, t1);
+    pthread_join(thread1, NULL);
+    // insert(pager, 3, 3, 1);
+    // select_all_rows(pager, 3);
+    // insert(pager, 3, 6, 5);
+    // select_all_rows(pager, 7);
     // insert(pager, 5, 5);
     // insert(pager, 1, 1);
     // insert(pager, 2, 2);
