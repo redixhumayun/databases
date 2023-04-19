@@ -24,8 +24,9 @@ typedef enum PageType {
 const char NODE_INITIALIZED = 'Y';
 
 //  Define the required mutexes here
-pthread_mutex_t row_lock;
-pthread_mutex_t pager_lock;
+pthread_mutex_t row_insert_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t row_update_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t pager_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /**
  * @brief The size of this struct on my current compiler is 24 bytes
@@ -414,6 +415,9 @@ void _insert_key_value_pair_to_internal_node(void* node, uint32_t key, void* chi
 }
 
 void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t value) {
+    //  Acquire the lock for inserting a row
+    pthread_mutex_lock(&row_insert_lock);
+
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
     printf("The number of cells is %d\n", num_cells);
 
@@ -452,6 +456,7 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
 
     *(uint32_t*)leaf_node_num_cells(node) = num_cells + 1;
     printf("\n");
+    pthread_mutex_unlock(&row_insert_lock);
     return;
 }
 
@@ -965,8 +970,20 @@ int main() {
     t1->value = 3;
     t1->pager = pager;
     pthread_t thread1;
+
+    Transaction* t2 = malloc(sizeof(Transaction));
+    t2->tx_id = -1;
+    t2->transaction_type = INSERT;
+    t2->key = 6;
+    t2->value = 6;
+    t2->pager = pager;
+    pthread_t thread2;
+
     pthread_create(&thread1, NULL, start_transaction, t1);
+    pthread_create(&thread2, NULL, start_transaction, t2);
     pthread_join(thread1, NULL);
+    pthread_join(thread2, NULL);
+    //  TODO: This code currently fails because inserting is not thread safe. Running this example will show only the key 6 inserted
     // insert(pager, 3, 3, 1);
     // select_all_rows(pager, 3);
     // insert(pager, 3, 6, 5);
@@ -977,7 +994,7 @@ int main() {
     // search(pager, 1);
     // delete(pager, 1);
     // search(pager, 1);
-    // print_all_pages(pager);
+    print_all_pages(pager);
     close_database_file(pager);
     return 0;
 }
