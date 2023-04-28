@@ -303,6 +303,9 @@ void update(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_
         return;
     }
 
+    //  Acquire a lock to update a row
+    //  NOTE: The locking currently uses a global lock. Ideally, each row struct should have it's own lock, so updating one row does not block other rows
+    pthread_mutex_lock(&row_update_lock);
     Row* new_row = next_available_leaf_node_cell(node);
     new_row->id = row->id;
     new_row->is_deleted = false;
@@ -320,6 +323,9 @@ void update(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_
 
     //  update the free block list with the address of the deleted value
     _insert_into_free_block_list(node, row, LEAF_NODE_VALUE_SIZE);
+
+    //  Release the acquired lock
+    pthread_mutex_unlock(&row_update_lock);
     return;
 }
 
@@ -979,11 +985,21 @@ int main() {
     t2->pager = pager;
     pthread_t thread2;
 
+    Transaction* t3 = malloc(sizeof(Transaction));
+    t3->tx_id = -1;
+    t3->transaction_type = INSERT;
+    t3->key = 6;
+    t3->value = 9;
+    t3->pager = pager;
+    pthread_t thread3;
+
     pthread_create(&thread1, NULL, start_transaction, t1);
     pthread_create(&thread2, NULL, start_transaction, t2);
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
-    //  TODO: This code currently fails because inserting is not thread safe. Running this example will show only the key 6 inserted
+
+    pthread_create(&thread3, NULL, start_transaction, t3);
+    pthread_join(thread3, NULL);
     // insert(pager, 3, 3, 1);
     // select_all_rows(pager, 3);
     // insert(pager, 3, 6, 5);
