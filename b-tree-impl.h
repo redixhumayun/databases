@@ -23,11 +23,11 @@ uint32_t get_root_page(Pager* pager);
 void initialize_leaf_node(void* node);
 void initialize_internal_node(void* node);
 
-#define _insert(pager, node, key, value) \
+#define _insert(pager, node, key, value, tx_id) \
     _Generic((value), \
-        uint32_t: _insert_into_leaf, void*: _insert_into_internal)(pager, node, key, value)
+        uint32_t: _insert_into_leaf, void*: _insert_into_internal)(pager, node, key, value, tx_id)
 
-void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value);
-void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_pointer);
+void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_id);
+void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_pointer, uint32_t tx_id);
 
 void print_node(void* node);

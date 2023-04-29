@@ -348,11 +348,11 @@ void initialize_internal_node(void* node) {
     printf("Done initializing the internal node\n");
 }
 
-void split_internal_node(Pager* pager, void* node, void* sibling_node, uint32_t key, void* child_pointer) {
+void split_internal_node(Pager* pager, void* node, void* sibling_node, uint32_t key, void* child_pointer, uint32_t tx_id) {
     return;
 }
 
-void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key, uint32_t value) {
+void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key, uint32_t value, uint32_t tx_id) {
     printf("****\n");
     printf("Splitting the leaf node\n");
 
@@ -374,7 +374,7 @@ void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key,
         uintptr_t* value = *key_pointer_address;
         printf("Copying the key: %d\n", key);
         printf("Copying the value: %d\n", *(uint32_t*)value);
-        _insert(pager, sibling_node, key, *(uint32_t*)value);
+        _insert(pager, sibling_node, key, *(uint32_t*)value, tx_id);
     }
 
     //  Update the number of cells in the original node
@@ -386,10 +386,10 @@ void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key,
     //  Insert the new key and value into one of the nodes
     if (key <= *leaf_node_key(sibling_node, 0)) {
         printf("Inserting the key %d into the original node\n", key);
-        _insert(pager, node, key, value);
+        _insert(pager, node, key, value, tx_id);
     } else {
         printf("Inserting the key %d into the new node\n", key);
-        _insert(pager, sibling_node, key, value);
+        _insert(pager, sibling_node, key, value, tx_id);
     }
     return;
 }
@@ -466,7 +466,7 @@ void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t valu
     return;
 }
 
-void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_pointer) {
+void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_pointer, uint32_t tx_id) {
     uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
     printf("The number of keys is %d\n", num_keys);
 
@@ -493,15 +493,15 @@ void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_p
 
     printf("The internal node needs to be split\n");
     void* sibling_node = get_page(pager, pager->num_pages);
-    split_internal_node(pager, node, sibling_node, key, child_pointer);
+    split_internal_node(pager, node, sibling_node, key, child_pointer, tx_id);
     if (key <= *internal_node_key(sibling_node, 0)) {
-        _insert(pager, node, key, child_pointer);
+        _insert(pager, node, key, child_pointer, tx_id);
     } else {
-        _insert(pager, sibling_node, key, child_pointer);
+        _insert(pager, sibling_node, key, child_pointer, tx_id);
     }
 
     int key_to_promote = *internal_node_key(sibling_node, 0);
-    _insert(pager, parent_page, key_to_promote, sibling_node);
+    _insert(pager, parent_page, key_to_promote, sibling_node, tx_id);
     *node_parent_pointer(sibling_node) = parent_page;
     *node_parent_pointer(node) = parent_page;
 
@@ -521,7 +521,7 @@ void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_p
     return;
 }
 
-void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
+void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value, uint32_t tx_id) {
     uint32_t num_cells = *(uint32_t*)leaf_node_num_cells(node);
     printf("The number of cells is %d\n", num_cells);
 
@@ -548,10 +548,10 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value) {
     }
 
     void* sibling_node = get_page(pager, pager->num_pages);
-    split_leaf_node(pager, node, sibling_node, key, value);
+    split_leaf_node(pager, node, sibling_node, key, value, tx_id);
 
     int key_to_promote = *leaf_node_key(sibling_node, 0);
-    _insert(pager, *parent_page_pointer, key_to_promote, node);
+    _insert(pager, *parent_page_pointer, key_to_promote, node, tx_id);
     *node_parent_pointer(sibling_node) = *parent_page_pointer;
     *node_parent_pointer(node) = *parent_page_pointer;
 
@@ -584,7 +584,7 @@ void insert(Pager* pager, uint32_t key, uint32_t value, uint32_t tx_id) {
         return;
     }
 
-    _insert(pager, node, key, value);
+    _insert(pager, node, key, value, tx_id);
     return;
 }
 
