@@ -394,7 +394,7 @@ void split_leaf_node(Pager* pager, void* node, void* sibling_node, uint32_t key,
     return;
 }
 
-void _insert_key_value_pair_to_internal_node(void* node, uint32_t key, void* child_pointer) {
+void _insert_key_value_pair_to_internal_node(void* node, uint32_t key, void* child_pointer, uint32_t tx_id) {
     uint32_t num_keys = *(uint32_t*)internal_node_num_keys(node);
     printf("The number of keys is %d\n", num_keys);
 
@@ -420,7 +420,7 @@ void _insert_key_value_pair_to_internal_node(void* node, uint32_t key, void* chi
     *(uint32_t*)internal_node_num_keys(node) = num_keys + 1;
 }
 
-void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t value) {
+void _insert_key_value_pair_to_leaf_node(void* node, uint32_t key, uint32_t value, uint32_t tx_id) {
     //  Acquire the lock for inserting a row
     pthread_mutex_lock(&row_insert_lock);
 
@@ -473,7 +473,7 @@ void _insert_into_internal(Pager* pager, void* node, uint32_t key, void* child_p
     //  Check if the node needs to be split
     if (num_keys < NODE_ORDER - 1) {
         printf("The internal node does not need to be split\n");
-        _insert_key_value_pair_to_internal_node(node, key, child_pointer);
+        _insert_key_value_pair_to_internal_node(node, key, child_pointer, tx_id);
         return;
     }
 
@@ -529,7 +529,7 @@ void _insert_into_leaf(Pager* pager, void* node, uint32_t key, uint32_t value, u
     if (num_cells < NODE_ORDER) {
         //  this leaf node does not need to be split
         printf("The leaf node does not need to be split\n");
-        _insert_key_value_pair_to_leaf_node(node, key, value);
+        _insert_key_value_pair_to_leaf_node(node, key, value, tx_id);
         return;
     }
 
