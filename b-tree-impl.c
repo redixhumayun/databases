@@ -14,7 +14,7 @@
 #include "./utils.h"
 
 const uint32_t PAGE_SIZE = 4096;
-const int NODE_ORDER = 3;
+const int NODE_ORDER = 10;
 
 typedef enum PageType
 {
@@ -318,6 +318,15 @@ void delete(Pager *pager, uint32_t key)
 
 void update(Pager *pager, void *node, uint32_t key, uint32_t value, uint32_t tx_id)
 {
+    printf("***ROW UPDATE***\n");
+    //  Write to the WAL first
+    int result = wal_write(tx_id, value);
+    if (result == -1)
+    {
+        perror("Failed to write to the WAL\n");
+        return;
+    }
+
     uint32_t key_index = binary_search_modify_pointer(&node, key);
     uint32_t key_at_index = *leaf_node_key(node, key_index);
     uintptr_t **key_pointer_address = leaf_node_key_pointer(node, key_index);
@@ -352,6 +361,7 @@ void update(Pager *pager, void *node, uint32_t key, uint32_t value, uint32_t tx_
 
     //  Release the acquired lock
     pthread_mutex_unlock(&row_update_lock);
+    printf("***END ROW UPDATE***\n");
     return;
 }
 
@@ -457,6 +467,14 @@ void _insert_key_value_pair_to_internal_node(void *node, uint32_t key, void *chi
 
 void _insert_key_value_pair_to_leaf_node(void *node, uint32_t key, uint32_t value, uint32_t tx_id)
 {
+    //  Write the key and value to the WAL
+    int result = wal_write(tx_id, value);
+    if (result == -1)
+    {
+        perror("Failed to write to the WAL\n");
+        return;
+    }
+
     //  Acquire the lock for inserting a row
     pthread_mutex_lock(&row_insert_lock);
 
@@ -478,18 +496,6 @@ void _insert_key_value_pair_to_leaf_node(void *node, uint32_t key, uint32_t valu
 
     *(uint32_t *)leaf_node_key(node, key_index) = key;
     printf("Set the key as %d\n", key);
-
-    int result = wal_write(tx_id, value);
-    if (result == -1)
-    {
-        perror("Failed to write to the WAL\n");
-        return;
-    }
-    if (tx_id == -1)
-    {
-        printf("Failed to write to the WAL\n");
-        return;
-    }
 
     Row *row = next_available_leaf_node_cell(node);
     row->id = generate_random_uint32();
@@ -1139,7 +1145,7 @@ int main()
     Transaction *t3 = malloc(sizeof(Transaction));
     t3->tx_id = -1;
     t3->transaction_type = INSERT;
-    t3->key = 6;
+    t3->key = 9;
     t3->value = 9;
     t3->pager = pager;
     pthread_t thread3;
@@ -1149,8 +1155,9 @@ int main()
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
 
-    // pthread_create(&thread3, NULL, start_transaction, t3);
-    // pthread_join(thread3, NULL);
+    pthread_create(&thread3, NULL, start_transaction, t3);
+    pthread_join(thread3, NULL);
+
     // insert(pager, 3, 3, 1);
     // select_all_rows(pager, 3);
     // insert(pager, 3, 6, 5);

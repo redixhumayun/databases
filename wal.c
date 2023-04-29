@@ -12,7 +12,7 @@ struct stat file_info;
 pthread_mutex_t wal_write_mutex = PTHREAD_MUTEX_INITIALIZER; //  the PTHREAD_MUTEX_INITIALIZER macro initializes the mutex to a default value
 
 int fd = 0;
-int nextXid = 0;
+int nextXid = -1;
 
 void wal_init(const char *wal_path)
 {
@@ -33,8 +33,7 @@ void wal_init(const char *wal_path)
  * @return uint32_t
  */
 
-//  NOTE: This needs to change to use the same lock as the wal_write method.
-//  Otherwise, we could have a situation where the wal_write method is writing a record and the get_next_xid method is reading the header and the number of records is not correct.
+//  NOTE: This method shouldn't read from the WAL file each time. It should only read once when the WAL is initialized and then increment the transaction ID in memory.
 uint32_t get_next_xid()
 {
     uint32_t result;
@@ -45,9 +44,9 @@ uint32_t get_next_xid()
     printf("***GETTING NEXT XID***\n");
     do
     {
-        if (nextXid != 0)
+        if (nextXid != -1)
         {
-            result = nextXid++;
+            result = ++nextXid;
             break;
         }
 
@@ -59,13 +58,15 @@ uint32_t get_next_xid()
             perror("Error getting file info");
             exit(1);
         }
-        else if (file_info.st_size == 0)
+        else if (file_info.st_size <= 1)
         {
             printf("The WAL file is empty\n");
             //  The first tx_id should be 1
-            result = 1;
+            nextXid = 1;
+            result = nextXid;
             break;
         }
+        printf("The size of the file is: %lld\n", file_info.st_size);
 
         int read_result = read(fd, wal_header, sizeof(WalHeader));
         if (read_result != sizeof(WalHeader))
@@ -99,7 +100,7 @@ uint32_t get_next_xid()
     {
         free(wal_record);
     }
-    printf("The value of result is: %d\n", result);
+    printf("The value of nextXid is: %d\n", nextXid);
     printf("***END OF GETTING NEXT XID***\n");
     pthread_mutex_unlock(&wal_write_mutex);
 
@@ -123,6 +124,7 @@ int wal_write(uint32_t tx_id, uint32_t value)
     }
     //  Acquire the mutex required for writing to the WAL
     pthread_mutex_lock(&wal_write_mutex);
+    printf("\n");
     printf("***WRITING TO THE WAL***\n");
     printf("Writing the following values to the WAL:\n");
     printf("\ttx_id: %d\n", tx_id);
@@ -133,6 +135,7 @@ int wal_write(uint32_t tx_id, uint32_t value)
     {
         //  Read the beginning of the file and find the number of records
         WalHeader *wal_header = (WalHeader *)malloc(sizeof(WalHeader));
+        lseek(fd, 0, SEEK_SET); //  Move the offset pointer to the beginning of the file (just in case it's not already there)
         int read_result = read(fd, wal_header, sizeof(WalHeader));
         if (read_result == -1)
         {
@@ -168,7 +171,10 @@ int wal_write(uint32_t tx_id, uint32_t value)
         }
 
         //  Update the WAL header
-        wal_header->num_of_records++;
+        printf("The number of records in the wal currently is: %d\n", wal_header->num_of_records);
+        uint32_t new_num_of_records = wal_header->num_of_records + 1;
+        printf("The new number of records in the wal is: %d\n", new_num_of_records);
+        wal_header->num_of_records = new_num_of_records;
         printf("Increment wal_header to: %d\n", wal_header->num_of_records);
         write_result = pwrite(fd, wal_header, sizeof(WalHeader), 0);
         if (write_result == -1)
@@ -179,6 +185,7 @@ int wal_write(uint32_t tx_id, uint32_t value)
         }
     } while (0);
     printf("***END OF WRITING TO THE WAL***\n");
+    printf("\n");
     pthread_mutex_unlock(&wal_write_mutex);
     return result;
 }
