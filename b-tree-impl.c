@@ -479,7 +479,7 @@ void _insert_key_value_pair_to_leaf_node(void *node, uint32_t key, uint32_t valu
     *(uint32_t *)leaf_node_key(node, key_index) = key;
     printf("Set the key as %d\n", key);
 
-    int result = wal_write(value);
+    int result = wal_write(tx_id, value);
     if (result == -1)
     {
         perror("Failed to write to the WAL\n");
@@ -936,7 +936,6 @@ void *start_transaction(void *t)
     uint32_t tx_id = get_next_xid();
     transaction->tx_id = tx_id;
 
-    printf("The transaction ID is %d\n", tx_id);
     switch (transaction->transaction_type)
     {
     case INSERT:
@@ -1111,11 +1110,11 @@ void print_node(void *node)
 
 void print_all_pages(Pager *pager)
 {
-    printf("***\n");
-    printf("Printing all pages\n");
+    printf("***PRINT FILE***\n");
     uint32_t root_page_num = pager->root_page_num;
     void *root_node = get_page(pager, root_page_num);
     print_node(root_node);
+    printf("***END OF PRINT FILE***\n");
 }
 
 int main()
@@ -1150,8 +1149,8 @@ int main()
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
 
-    pthread_create(&thread3, NULL, start_transaction, t3);
-    pthread_join(thread3, NULL);
+    // pthread_create(&thread3, NULL, start_transaction, t3);
+    // pthread_join(thread3, NULL);
     // insert(pager, 3, 3, 1);
     // select_all_rows(pager, 3);
     // insert(pager, 3, 6, 5);
