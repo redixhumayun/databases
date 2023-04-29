@@ -3,5 +3,12 @@
     "files.associations": {
         "stdint.h": "c",
         "wal.h": "c"
+    },
+    "C_Cpp.formatting": "clangFormat",
+    "[c]": {
+        "editor.wordBasedSuggestions": false,
+        "editor.suggest.insertMode": "replace",
+        "editor.semanticHighlighting.enabled": true,
+        "editor.formatOnSave": true
     }
 }
