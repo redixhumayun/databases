@@ -29,20 +29,6 @@ pthread_mutex_t row_insert_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t row_update_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t pager_lock = PTHREAD_MUTEX_INITIALIZER;
 
-/**
- * @brief The size of this struct on my current compiler is 24 bytes
- *
- */
-typedef struct Row
-{
-    uint32_t id;
-    uint32_t xmin; //  using postgresql xmin
-    uint32_t xmax; //  using postgresql xmax
-    uint32_t data;
-    bool is_deleted;
-    void *prev_row;
-} Row;
-
 typedef struct Transaction
 {
     uint32_t tx_id;
@@ -63,7 +49,7 @@ const uint32_t IS_ROOT_SIZE = sizeof(uint32_t);
 const uint32_t IS_ROOT_OFFSET = NODE_TYPE_SIZE + NODE_INITIALIZED_SIZE;
 const uintptr_t PARENT_POINTER_SIZE = sizeof(uintptr_t);
 const uint32_t PARENT_POINTER_OFFSET = IS_ROOT_OFFSET + IS_ROOT_SIZE;
-const uint16_t FREE_BLOCK_OFFSET_SIZE = sizeof(uint16_t);
+const uint32_t FREE_BLOCK_OFFSET_SIZE = sizeof(uint32_t);
 const uint32_t FREE_BLOCK_OFFSET_OFFSET = PARENT_POINTER_OFFSET + PARENT_POINTER_SIZE;
 const uint32_t COMMON_NODE_HEADER_SIZE =
     NODE_TYPE_SIZE + NODE_INITIALIZED_SIZE + IS_ROOT_SIZE + PARENT_POINTER_SIZE + FREE_BLOCK_OFFSET_SIZE;
@@ -128,7 +114,7 @@ void **node_parent_pointer(void *node)
     return node + PARENT_POINTER_OFFSET;
 }
 
-uint32_t *node_free_block_offset(void *node)
+uint16_t *node_free_block_offset(void *node)
 {
     return node + FREE_BLOCK_OFFSET_OFFSET;
 }
@@ -179,24 +165,56 @@ uintptr_t **leaf_node_key_pointer(void *node, uint32_t cell_num)
     return node + LEAF_NODE_HEADER_SIZE + cell_num * (LEAF_NODE_KEY_SIZE + LEAF_NODE_KEY_POINTER_SIZE) + LEAF_NODE_KEY_SIZE;
 }
 
+/**
+ * @brief This method is used to find the next available cell in a leaf node. Leaf nodes grow backwards from the end and there is a pointer to each cell.
+ * If there are no cells, the next available cell is the first cell.
+ * If there are cells, the next available cell is the cell before the last cell.
+ * @param node
+ * @return Row*
+ */
 Row *next_available_leaf_node_cell(void *node)
 {
     uint32_t num_of_cells = *(uint32_t *)(leaf_node_num_cells(node));
     if (num_of_cells == 0)
     {
-        return node + LEAF_NODE_VALUE_OFFSET;
+        return (Row *)(node + LEAF_NODE_VALUE_OFFSET);
     }
+
+    // Check if there is a valid free block in this page
+    uint16_t *free_block_offset = (uint16_t *)(node_free_block_offset(node));
+    uint16_t *prev = NULL;
+
+    // If there is a valid free block, traverse the linked list to find the last free block
+    // Return the last free block and update the previous one
+    if (*free_block_offset != 0)
+    {
+        while (*free_block_offset != 0)
+        {
+            prev = free_block_offset;
+            free_block_offset = (uint16_t *)((uint8_t *)node + *free_block_offset);
+        }
+        prev[0] = 0;
+        prev[1] = 0;
+        return (Row *)free_block_offset;
+    }
+
     void *start_point = node + LEAF_NODE_VALUE_OFFSET;
     for (int i = 0; i < num_of_cells; i++)
     {
-        start_point -= LEAF_NODE_VALUE_SIZE;
+        start_point = (uint8_t *)start_point - LEAF_NODE_VALUE_SIZE;
     }
     return (Row *)start_point;
 }
 
+/**
+ * @brief This method will determine what type of node is passed in
+ *
+ * @param node
+ * @return int
+ */
 int check_type_of_node(void *node)
 {
-    uint8_t page_type = *node_type(node);
+    uint32_t page_type = *node_type(node);
     printf("Page type: %d\n", page_type);
     switch (page_type)
     {
@@ -223,24 +241,25 @@ int check_type_of_node(void *node)
  */
 void _insert_into_free_block_list(void *node, void *deleted_memory_address, uint16_t deleted_memory_size)
 {
-    printf("***\n");
+    printf("***SETTING FREE BLOCK***\n");
     printf("Deleting memory address %p of size %d\n", deleted_memory_address, deleted_memory_size);
 
     //  If the free block list is empty, store the offset in the page header
     printf("The deleted memory address is %p\n", deleted_memory_address);
     uint16_t free_block_offset = *(uint16_t *)node_free_block_offset(node);
-    uint32_t offset_between_deleted_and_header = deleted_memory_address - node;
+    uint16_t offset_between_deleted_and_header = deleted_memory_address - node;
     printf("The offset between the deleted memory address and the header is %d\n", offset_between_deleted_and_header);
     if (free_block_offset == 0)
     {
         printf("The free block offset is 0\n");
-        *(uint16_t *)node_free_block_offset(node) = offset_between_deleted_and_header;
-        printf("Done setting the free block address\n");
-        printf("***\n");
+        uint16_t *free_block_offset_address = node_free_block_offset(node);
+        free_block_offset_address[0] = offset_between_deleted_and_header;
+        free_block_offset_address[1] = deleted_memory_size;
+        printf("***DONE SETTING FREE BLOCK***\n");
         return;
     }
 
-    //  If  the free block list is not empty, traverse the list until the first empty one is found, which is
+    //  If the free block list is not empty, traverse the list until the first empty one is found, which is
     //  past the address of offset
     //  The new free block will be situated between the previous free block and the current free block
     void *free_block = node + free_block_offset;
@@ -266,13 +285,20 @@ void _insert_into_free_block_list(void *node, void *deleted_memory_address, uint
     deleted_memory_location[0] = offset_of_deleted_from_next;
     deleted_memory_location[1] = deleted_memory_size;
     printf("Done deleting memory address %p of size %d\n", deleted_memory_address, deleted_memory_size);
-    printf("***\n");
+    printf("***DONE SETTING FREE BLOCK***\n");
     return;
 }
 
-void delete(Pager *pager, uint32_t key)
+/**
+ * @brief This function is used to delete a row from the table
+ *
+ * @param pager
+ * @param key
+ * @param tx_id
+ */
+void delete(Pager *pager, uint32_t key, uint32_t tx_id)
 {
-    printf("****\n");
+    printf("***DELETE***\n");
     printf("Deleting key %d\n", key);
 
     void *node = get_page(pager, pager->root_page_num);
@@ -296,8 +322,8 @@ void delete(Pager *pager, uint32_t key)
     uintptr_t **key_pointer_address = leaf_node_key_pointer(node, key_index);
     printf("The key pointer is %p\n", key_pointer_address);
 
-    uintptr_t *value = *key_pointer_address;
-    printf("The value is %d\n", *(uint32_t *)value);
+    Row *row = (Row *)*key_pointer_address;
+    printf("The value is %d\n", row->data);
 
     //  Shift the cells starting at one past the key pointer address to the left
     //  This will erase the contents of the current key and key pointer
@@ -310,10 +336,13 @@ void delete(Pager *pager, uint32_t key)
     //  Update the number of cells
     *(uint32_t *)leaf_node_num_cells(node) = num_cells - 1;
 
+    //  Zeroing out the cell whose pointer was deleted
+    memset(row, 0, LEAF_NODE_VALUE_SIZE);
+
     //  Update the free block list with the address of the deleted value
-    _insert_into_free_block_list(node, value, LEAF_NODE_VALUE_SIZE);
-    printf("Done deleting key %d\n", key);
-    printf("****\n");
+    _insert_into_free_block_list(node, row, LEAF_NODE_VALUE_SIZE);
+
+    printf("***DONE DELETE***\n");
 }
 
 void update(Pager *pager, void *node, uint32_t key, uint32_t value, uint32_t tx_id)
@@ -504,6 +533,7 @@ void _insert_key_value_pair_to_leaf_node(void *node, uint32_t key, uint32_t valu
     row->data = value;
     row->is_deleted = false;
     row->prev_row = NULL;
+    printf("Created a row with a random id of: %d\n", row->id);
 
     uintptr_t **key_pointer_address = leaf_node_key_pointer(node, key_index);
     *key_pointer_address = (uintptr_t *)row;
@@ -633,6 +663,7 @@ void _insert_into_leaf(Pager *pager, void *node, uint32_t key, uint32_t value, u
 
 void insert(Pager *pager, uint32_t key, uint32_t value, uint32_t tx_id)
 {
+    printf("***INSERT***\n");
     //  get the root node
     void *node = get_page(pager, pager->root_page_num);
     printf("The root node is at %p\n", node);
@@ -651,6 +682,7 @@ void insert(Pager *pager, uint32_t key, uint32_t value, uint32_t tx_id)
     }
 
     _insert(pager, node, key, value, tx_id);
+    printf("***END INSERT***\n\n");
     return;
 }
 
@@ -888,7 +920,7 @@ int binary_search(void *node, uint32_t key)
  */
 int search(Pager *pager, void **node, uint32_t key)
 {
-    int node_type = check_type_of_node(node);
+    int node_type = check_type_of_node(*node);
 
     if (node_type == INTERNAL_NODE)
     {
@@ -948,7 +980,7 @@ void *start_transaction(void *t)
         insert(transaction->pager, transaction->key, transaction->value, transaction->tx_id);
         break;
     case DELETE:
-        delete (transaction->pager, transaction->key);
+        delete (transaction->pager, transaction->key, tx_id);
         break;
     default:
         printf("Unknown transaction type.\n");
@@ -1150,6 +1182,29 @@ int main()
     t3->pager = pager;
     pthread_t thread3;
 
+    Transaction *delete_tx = malloc(sizeof(Transaction));
+    delete_tx->tx_id = -1;
+    delete_tx->transaction_type = DELETE;
+    delete_tx->key = 3;
+    delete_tx->pager = pager;
+    pthread_t thread4;
+
+    Transaction *t5 = malloc(sizeof(Transaction));
+    t5->tx_id = -1;
+    t5->transaction_type = INSERT;
+    t5->key = 12;
+    t5->value = 12;
+    t5->pager = pager;
+    pthread_t thread5;
+
+    Transaction *t6 = malloc(sizeof(Transaction));
+    t6->tx_id = -1;
+    t6->transaction_type = INSERT;
+    t6->key = 15;
+    t6->value = 15;
+    t6->pager = pager;
+    pthread_t thread6;
+
     pthread_create(&thread1, NULL, start_transaction, t1);
     pthread_create(&thread2, NULL, start_transaction, t2);
     pthread_join(thread1, NULL);
@@ -1158,16 +1213,15 @@ int main()
     pthread_create(&thread3, NULL, start_transaction, t3);
     pthread_join(thread3, NULL);
 
-    // insert(pager, 3, 3, 1);
-    // select_all_rows(pager, 3);
-    // insert(pager, 3, 6, 5);
-    // select_all_rows(pager, 7);
-    // insert(pager, 5, 5);
-    // insert(pager, 1, 1);
-    // insert(pager, 2, 2);
-    // search(pager, 1);
-    // delete(pager, 1);
-    // search(pager, 1);
+    pthread_create(&thread4, NULL, start_transaction, delete_tx);
+    pthread_join(thread4, NULL);
+
+    pthread_create(&thread5, NULL, start_transaction, t5);
+    pthread_join(thread5, NULL);
+
+    pthread_create(&thread6, NULL, start_transaction, t6);
+    pthread_join(thread6, NULL);
+
     print_all_pages(pager);
     close_database_file(pager);
     return 0;

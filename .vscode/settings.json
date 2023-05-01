@@ -2,7 +2,27 @@
     "python.analysis.typeCheckingMode": "basic",
     "files.associations": {
         "stdint.h": "c",
-        "wal.h": "c"
+        "wal.h": "c",
+        "__node_handle": "c",
+        "__bit_reference": "c",
+        "__functional_base": "c",
+        "algorithm": "c",
+        "atomic": "c",
+        "bitset": "c",
+        "chrono": "c",
+        "cstddef": "c",
+        "__memory": "c",
+        "functional": "c",
+        "iterator": "c",
+        "limits": "c",
+        "locale": "c",
+        "optional": "c",
+        "ratio": "c",
+        "system_error": "c",
+        "tuple": "c",
+        "type_traits": "c",
+        "vector": "c",
+        "memory": "c"
     },
     "C_Cpp.formatting": "clangFormat",
     "[c]": {
